@@ -544,9 +544,15 @@ def set_overdub(req: OverdubRequest):
     return ableton.send_command("set_overdub", {"enabled": req.enabled})
 
 # AI Music Helpers
+NOTE_TO_MIDI = {"C": 0, "C#": 1, "DB": 1, "D": 2, "D#": 3, "EB": 3, "E": 4, "F": 5,
+                "F#": 6, "GB": 6, "G": 7, "G#": 8, "AB": 8, "A": 9, "A#": 10, "BB": 10, "B": 11}
+
 @app.get("/api/music/scale")
 def get_scale_notes(root: str, scale_type: str, octave: int = 4):
-    return ableton.send_command("get_scale_notes", {"root": root, "scale_type": scale_type, "octave": octave})
+    # Convert string root to MIDI note number
+    root_upper = root.upper().replace("♯", "#").replace("♭", "B")
+    root_midi = NOTE_TO_MIDI.get(root_upper, 0) + (octave * 12)
+    return ableton.send_command("get_scale_notes", {"root": root_midi, "scale_type": scale_type})
 
 @app.post("/api/tracks/{track_index}/clips/{clip_index}/quantize")
 def quantize_clip(track_index: int, clip_index: int, req: QuantizeRequest):
