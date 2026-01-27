@@ -336,6 +336,16 @@ Get audio clip gain.
 {"gain_db": 0.0, "gain_linear": 1.0}
 ```
 
+### PUT /tracks/{track_index}/clips/{clip_index}/gain
+Set audio clip gain.
+
+**Request:**
+```json
+{"gain": -6.0}
+```
+
+**Validation:** Gain is in dB.
+
 ### GET /tracks/{track_index}/clips/{clip_index}/pitch
 Get audio clip pitch.
 
@@ -343,6 +353,16 @@ Get audio clip pitch.
 ```json
 {"pitch_coarse": 0, "pitch_fine": 0}
 ```
+
+### PUT /tracks/{track_index}/clips/{clip_index}/pitch
+Set audio clip pitch.
+
+**Request:**
+```json
+{"pitch": 12}
+```
+
+**Validation:** Pitch must be between -48 and +48 semitones.
 
 ---
 

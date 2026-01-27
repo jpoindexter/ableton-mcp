@@ -15,6 +15,7 @@ This document describes all configuration options for AbletonMCP.
 | `RATE_LIMIT_ENABLED` | `true` | Enable/disable rate limiting |
 | `RATE_LIMIT_REQUESTS` | `100` | Maximum requests per time window |
 | `RATE_LIMIT_WINDOW` | `60` | Time window in seconds |
+| `TRUST_PROXY_HEADERS` | `false` | Trust X-Forwarded-For headers for client IP. **Only enable when behind a trusted reverse proxy!** |
 
 ### Ableton Connection
 

@@ -12,7 +12,7 @@ Run with: python rest_api_server.py
 Or: uvicorn rest_api_server:app --host 0.0.0.0 --port 8000
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator, Field
 from typing import Optional, List, Dict, Any
@@ -48,6 +48,10 @@ API_KEY_ENABLED = REST_API_KEY is not None and len(REST_API_KEY) > 0
 RATE_LIMIT_ENABLED = os.environ.get("RATE_LIMIT_ENABLED", "true").lower() == "true"
 RATE_LIMIT_REQUESTS = int(os.environ.get("RATE_LIMIT_REQUESTS", "100"))
 RATE_LIMIT_WINDOW = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))  # seconds
+
+# Trust proxy headers only when explicitly enabled (for reverse proxy deployments)
+# WARNING: Only enable this if running behind a trusted reverse proxy!
+TRUST_PROXY_HEADERS = os.environ.get("TRUST_PROXY_HEADERS", "false").lower() == "true"
 
 # Command whitelist for security
 ALLOWED_COMMANDS = {
@@ -364,10 +368,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._lock = threading.Lock()
 
     def _get_client_ip(self, request: Request) -> str:
-        """Get client IP, handling proxies."""
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
+        """Get client IP. Only trusts proxy headers when TRUST_PROXY_HEADERS is enabled."""
+        # Only trust X-Forwarded-For when explicitly configured
+        # This prevents IP spoofing attacks when not behind a trusted proxy
+        if TRUST_PROXY_HEADERS:
+            forwarded = request.headers.get("X-Forwarded-For")
+            if forwarded:
+                return forwarded.split(",")[0].strip()
         return request.client.host if request.client else "unknown"
 
     def _cleanup_old_requests(self, client_ip: str, current_time: float):
@@ -740,7 +747,7 @@ def set_metronome(req: MetronomeRequest):
 
 # Tracks
 @app.get("/api/tracks/{track_index}")
-def get_track_info(track_index: int):
+def get_track_info(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX, description="Track index")):
     return ableton.send_command("get_track_info", {"track_index": track_index})
 
 @app.post("/api/tracks/midi")
@@ -752,60 +759,67 @@ def create_audio_track(req: TrackCreateRequest):
     return ableton.send_command("create_audio_track", {"index": req.index, "name": req.name})
 
 @app.delete("/api/tracks/{track_index}")
-def delete_track(track_index: int):
+def delete_track(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX)):
     return ableton.send_command("delete_track", {"track_index": track_index})
 
 @app.post("/api/tracks/{track_index}/duplicate")
-def duplicate_track(track_index: int):
+def duplicate_track(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX)):
     return ableton.send_command("duplicate_track", {"track_index": track_index})
 
 @app.post("/api/tracks/{track_index}/freeze")
-def freeze_track(track_index: int):
+def freeze_track(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX)):
     return ableton.send_command("freeze_track", {"track_index": track_index})
 
 @app.post("/api/tracks/{track_index}/flatten")
-def flatten_track(track_index: int):
+def flatten_track(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX)):
     return ableton.send_command("flatten_track", {"track_index": track_index})
 
 @app.put("/api/tracks/{track_index}/name")
-def set_track_name(track_index: int, req: TrackNameRequest):
+def set_track_name(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX), req: TrackNameRequest = None):
     return ableton.send_command("set_track_name", {"track_index": track_index, "name": req.name})
 
 @app.get("/api/tracks/{track_index}/color")
-def get_track_color(track_index: int):
+def get_track_color(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX)):
     return ableton.send_command("get_track_color", {"track_index": track_index})
 
 @app.put("/api/tracks/{track_index}/color")
-def set_track_color(track_index: int, req: TrackColorRequest):
+def set_track_color(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX), req: TrackColorRequest = None):
     return ableton.send_command("set_track_color", {"track_index": track_index, "color": req.color})
 
 @app.put("/api/tracks/{track_index}/mute")
-def set_track_mute(track_index: int, req: TrackBoolRequest):
+def set_track_mute(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX), req: TrackBoolRequest = None):
     return ableton.send_command("set_track_mute", {"track_index": track_index, "mute": req.value})
 
 @app.put("/api/tracks/{track_index}/solo")
-def set_track_solo(track_index: int, req: TrackBoolRequest):
+def set_track_solo(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX), req: TrackBoolRequest = None):
     return ableton.send_command("set_track_solo", {"track_index": track_index, "solo": req.value})
 
 @app.put("/api/tracks/{track_index}/arm")
-def set_track_arm(track_index: int, req: TrackBoolRequest):
+def set_track_arm(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX), req: TrackBoolRequest = None):
     return ableton.send_command("set_track_arm", {"track_index": track_index, "arm": req.value})
 
 @app.put("/api/tracks/{track_index}/volume")
-def set_track_volume(track_index: int, req: TrackVolumeRequest):
+def set_track_volume(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX), req: TrackVolumeRequest = None):
     return ableton.send_command("set_track_volume", {"track_index": track_index, "volume": req.volume})
 
 @app.put("/api/tracks/{track_index}/pan")
-def set_track_pan(track_index: int, req: TrackPanRequest):
+def set_track_pan(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX), req: TrackPanRequest = None):
     return ableton.send_command("set_track_pan", {"track_index": track_index, "pan": req.pan})
 
 # Clips
 @app.get("/api/tracks/{track_index}/clips/{clip_index}")
-def get_clip_info(track_index: int, clip_index: int):
+def get_clip_info(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX)
+):
     return ableton.send_command("get_clip_info", {"track_index": track_index, "clip_index": clip_index})
 
 @app.post("/api/tracks/{track_index}/clips/{clip_index}")
-def create_clip(track_index: int, clip_index: int, req: ClipCreateRequest):
+def create_clip(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    req: ClipCreateRequest = None
+):
     return ableton.send_command("create_clip", {
         "track_index": track_index,
         "clip_index": clip_index,
@@ -814,19 +828,32 @@ def create_clip(track_index: int, clip_index: int, req: ClipCreateRequest):
     })
 
 @app.delete("/api/tracks/{track_index}/clips/{clip_index}")
-def delete_clip(track_index: int, clip_index: int):
+def delete_clip(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX)
+):
     return ableton.send_command("delete_clip", {"track_index": track_index, "clip_index": clip_index})
 
 @app.post("/api/tracks/{track_index}/clips/{clip_index}/fire")
-def fire_clip(track_index: int, clip_index: int):
+def fire_clip(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX)
+):
     return ableton.send_command("fire_clip", {"track_index": track_index, "clip_index": clip_index})
 
 @app.post("/api/tracks/{track_index}/clips/{clip_index}/stop")
-def stop_clip(track_index: int, clip_index: int):
+def stop_clip(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX)
+):
     return ableton.send_command("stop_clip", {"track_index": track_index, "clip_index": clip_index})
 
 @app.post("/api/tracks/{track_index}/clips/{clip_index}/duplicate")
-def duplicate_clip(track_index: int, clip_index: int, req: ClipDuplicateRequest):
+def duplicate_clip(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    req: ClipDuplicateRequest = None
+):
     return ableton.send_command("duplicate_clip", {
         "track_index": track_index,
         "clip_index": clip_index,
@@ -834,7 +861,11 @@ def duplicate_clip(track_index: int, clip_index: int, req: ClipDuplicateRequest)
     })
 
 @app.put("/api/tracks/{track_index}/clips/{clip_index}/name")
-def set_clip_name(track_index: int, clip_index: int, req: ClipNameRequest):
+def set_clip_name(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    req: ClipNameRequest = None
+):
     return ableton.send_command("set_clip_name", {
         "track_index": track_index,
         "clip_index": clip_index,
@@ -842,14 +873,21 @@ def set_clip_name(track_index: int, clip_index: int, req: ClipNameRequest):
     })
 
 @app.get("/api/tracks/{track_index}/clips/{clip_index}/color")
-def get_clip_color(track_index: int, clip_index: int):
+def get_clip_color(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX)
+):
     return ableton.send_command("get_clip_color", {
         "track_index": track_index,
         "clip_index": clip_index
     })
 
 @app.put("/api/tracks/{track_index}/clips/{clip_index}/color")
-def set_clip_color(track_index: int, clip_index: int, req: ClipColorRequest):
+def set_clip_color(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    req: ClipColorRequest = None
+):
     return ableton.send_command("set_clip_color", {
         "track_index": track_index,
         "clip_index": clip_index,
@@ -857,14 +895,21 @@ def set_clip_color(track_index: int, clip_index: int, req: ClipColorRequest):
     })
 
 @app.get("/api/tracks/{track_index}/clips/{clip_index}/loop")
-def get_clip_loop(track_index: int, clip_index: int):
+def get_clip_loop(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX)
+):
     return ableton.send_command("get_clip_loop", {
         "track_index": track_index,
         "clip_index": clip_index
     })
 
 @app.put("/api/tracks/{track_index}/clips/{clip_index}/loop")
-def set_clip_loop(track_index: int, clip_index: int, req: ClipLoopRequest):
+def set_clip_loop(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    req: ClipLoopRequest = None
+):
     return ableton.send_command("set_clip_loop", {
         "track_index": track_index,
         "clip_index": clip_index,
@@ -874,7 +919,10 @@ def set_clip_loop(track_index: int, clip_index: int, req: ClipLoopRequest):
     })
 
 @app.post("/api/tracks/{track_index}/clips/{clip_index}/select")
-def select_clip(track_index: int, clip_index: int):
+def select_clip(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX)
+):
     return ableton.send_command("select_clip", {
         "track_index": track_index,
         "clip_index": clip_index
@@ -882,11 +930,18 @@ def select_clip(track_index: int, clip_index: int):
 
 # Notes
 @app.get("/api/tracks/{track_index}/clips/{clip_index}/notes")
-def get_clip_notes(track_index: int, clip_index: int):
+def get_clip_notes(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX)
+):
     return ableton.send_command("get_clip_notes", {"track_index": track_index, "clip_index": clip_index})
 
 @app.post("/api/tracks/{track_index}/clips/{clip_index}/notes")
-def add_notes(track_index: int, clip_index: int, req: AddNotesRequest):
+def add_notes(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    req: AddNotesRequest = None
+):
     notes = [{"pitch": n.pitch, "start_time": n.start_time, "duration": n.duration, "velocity": n.velocity} for n in req.notes]
     return ableton.send_command("add_notes_to_clip", {
         "track_index": track_index,
@@ -895,11 +950,18 @@ def add_notes(track_index: int, clip_index: int, req: AddNotesRequest):
     })
 
 @app.delete("/api/tracks/{track_index}/clips/{clip_index}/notes")
-def remove_all_notes(track_index: int, clip_index: int):
+def remove_all_notes(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX)
+):
     return ableton.send_command("remove_all_notes", {"track_index": track_index, "clip_index": clip_index})
 
 @app.post("/api/tracks/{track_index}/clips/{clip_index}/transpose")
-def transpose_notes(track_index: int, clip_index: int, req: TransposeRequest):
+def transpose_notes(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    req: TransposeRequest = None
+):
     return ableton.send_command("transpose_notes", {
         "track_index": track_index,
         "clip_index": clip_index,
@@ -908,7 +970,10 @@ def transpose_notes(track_index: int, clip_index: int, req: TransposeRequest):
 
 # Warp Markers
 @app.get("/api/tracks/{track_index}/clips/{clip_index}/warp-markers")
-def get_warp_markers(track_index: int, clip_index: int):
+def get_warp_markers(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX)
+):
     return ableton.send_command("get_warp_markers", {
         "track_index": track_index,
         "clip_index": clip_index
@@ -919,7 +984,11 @@ class WarpMarkerRequest(BaseModel):
     sample_time: Optional[float] = None
 
 @app.post("/api/tracks/{track_index}/clips/{clip_index}/warp-markers")
-def add_warp_marker(track_index: int, clip_index: int, req: WarpMarkerRequest):
+def add_warp_marker(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    req: WarpMarkerRequest = None
+):
     params = {
         "track_index": track_index,
         "clip_index": clip_index,
@@ -933,7 +1002,11 @@ class DeleteWarpMarkerRequest(BaseModel):
     beat_time: float
 
 @app.delete("/api/tracks/{track_index}/clips/{clip_index}/warp-markers")
-def delete_warp_marker(track_index: int, clip_index: int, req: DeleteWarpMarkerRequest):
+def delete_warp_marker(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    req: DeleteWarpMarkerRequest = None
+):
     return ableton.send_command("delete_warp_marker", {
         "track_index": track_index,
         "clip_index": clip_index,
@@ -942,17 +1015,53 @@ def delete_warp_marker(track_index: int, clip_index: int, req: DeleteWarpMarkerR
 
 # Audio Clip Properties
 @app.get("/api/tracks/{track_index}/clips/{clip_index}/gain")
-def get_clip_gain(track_index: int, clip_index: int):
+def get_clip_gain(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX)
+):
     return ableton.send_command("get_clip_gain", {
         "track_index": track_index,
         "clip_index": clip_index
     })
 
+class ClipGainRequest(BaseModel):
+    gain: float = Field(..., description="Gain in dB")
+
+@app.put("/api/tracks/{track_index}/clips/{clip_index}/gain")
+def set_clip_gain(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    req: ClipGainRequest = None
+):
+    return ableton.send_command("set_clip_gain", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "gain": req.gain
+    })
+
 @app.get("/api/tracks/{track_index}/clips/{clip_index}/pitch")
-def get_clip_pitch(track_index: int, clip_index: int):
+def get_clip_pitch(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX)
+):
     return ableton.send_command("get_clip_pitch", {
         "track_index": track_index,
         "clip_index": clip_index
+    })
+
+class ClipPitchRequest(BaseModel):
+    pitch: int = Field(..., ge=-48, le=48, description="Pitch shift in semitones")
+
+@app.put("/api/tracks/{track_index}/clips/{clip_index}/pitch")
+def set_clip_pitch(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    req: ClipPitchRequest = None
+):
+    return ableton.send_command("set_clip_pitch", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "pitch": req.pitch
     })
 
 # Scenes
@@ -965,47 +1074,54 @@ def create_scene(req: SceneCreateRequest):
     return ableton.send_command("create_scene", {"index": req.index, "name": req.name})
 
 @app.delete("/api/scenes/{scene_index}")
-def delete_scene(scene_index: int):
+def delete_scene(scene_index: int = Path(..., ge=0, le=MAX_SCENE_INDEX)):
     return ableton.send_command("delete_scene", {"scene_index": scene_index})
 
 @app.post("/api/scenes/{scene_index}/fire")
-def fire_scene(scene_index: int):
+def fire_scene(scene_index: int = Path(..., ge=0, le=MAX_SCENE_INDEX)):
     return ableton.send_command("fire_scene", {"scene_index": scene_index})
 
 @app.post("/api/scenes/{scene_index}/stop")
-def stop_scene(scene_index: int):
+def stop_scene(scene_index: int = Path(..., ge=0, le=MAX_SCENE_INDEX)):
     return ableton.send_command("stop_scene", {"scene_index": scene_index})
 
 @app.post("/api/scenes/{scene_index}/duplicate")
-def duplicate_scene(scene_index: int):
+def duplicate_scene(scene_index: int = Path(..., ge=0, le=MAX_SCENE_INDEX)):
     return ableton.send_command("duplicate_scene", {"scene_index": scene_index})
 
 @app.put("/api/scenes/{scene_index}/name")
-def set_scene_name(scene_index: int, req: SceneNameRequest):
+def set_scene_name(scene_index: int = Path(..., ge=0, le=MAX_SCENE_INDEX), req: SceneNameRequest = None):
     return ableton.send_command("set_scene_name", {"scene_index": scene_index, "name": req.name})
 
 class SceneColorRequest(BaseModel):
     color: int
 
 @app.get("/api/scenes/{scene_index}/color")
-def get_scene_color(scene_index: int):
+def get_scene_color(scene_index: int = Path(..., ge=0, le=MAX_SCENE_INDEX)):
     return ableton.send_command("get_scene_color", {"scene_index": scene_index})
 
 @app.put("/api/scenes/{scene_index}/color")
-def set_scene_color(scene_index: int, req: SceneColorRequest):
+def set_scene_color(scene_index: int = Path(..., ge=0, le=MAX_SCENE_INDEX), req: SceneColorRequest = None):
     return ableton.send_command("set_scene_color", {"scene_index": scene_index, "color": req.color})
 
 @app.post("/api/scenes/{scene_index}/select")
-def select_scene(scene_index: int):
+def select_scene(scene_index: int = Path(..., ge=0, le=MAX_SCENE_INDEX)):
     return ableton.send_command("select_scene", {"scene_index": scene_index})
 
 # Devices
 @app.get("/api/tracks/{track_index}/devices/{device_index}")
-def get_device_parameters(track_index: int, device_index: int):
+def get_device_parameters(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    device_index: int = Path(..., ge=0, le=MAX_DEVICE_INDEX)
+):
     return ableton.send_command("get_device_parameters", {"track_index": track_index, "device_index": device_index})
 
 @app.put("/api/tracks/{track_index}/devices/{device_index}/parameter")
-def set_device_parameter(track_index: int, device_index: int, req: DeviceParamRequest):
+def set_device_parameter(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    device_index: int = Path(..., ge=0, le=MAX_DEVICE_INDEX),
+    req: DeviceParamRequest = None
+):
     return ableton.send_command("set_device_parameter", {
         "track_index": track_index,
         "device_index": device_index,
@@ -1014,7 +1130,11 @@ def set_device_parameter(track_index: int, device_index: int, req: DeviceParamRe
     })
 
 @app.put("/api/tracks/{track_index}/devices/{device_index}/toggle")
-def toggle_device(track_index: int, device_index: int, req: DeviceToggleRequest):
+def toggle_device(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    device_index: int = Path(..., ge=0, le=MAX_DEVICE_INDEX),
+    req: DeviceToggleRequest = None
+):
     return ableton.send_command("toggle_device", {
         "track_index": track_index,
         "device_index": device_index,
@@ -1022,7 +1142,10 @@ def toggle_device(track_index: int, device_index: int, req: DeviceToggleRequest)
     })
 
 @app.delete("/api/tracks/{track_index}/devices/{device_index}")
-def delete_device(track_index: int, device_index: int):
+def delete_device(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    device_index: int = Path(..., ge=0, le=MAX_DEVICE_INDEX)
+):
     return ableton.send_command("delete_device", {"track_index": track_index, "device_index": device_index})
 
 # Return Tracks
@@ -1031,14 +1154,21 @@ def get_return_tracks():
     return ableton.send_command("get_return_tracks")
 
 @app.get("/api/tracks/{track_index}/sends/{send_index}")
-def get_send_level(track_index: int, send_index: int):
+def get_send_level(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    send_index: int = Path(..., ge=0, le=MAX_SEND_INDEX)
+):
     return ableton.send_command("get_send_level", {
         "track_index": track_index,
         "send_index": send_index
     })
 
 @app.post("/api/tracks/{track_index}/sends/{send_index}")
-def set_send_level(track_index: int, send_index: int, req: SendLevelRequest):
+def set_send_level(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    send_index: int = Path(..., ge=0, le=MAX_SEND_INDEX),
+    req: SendLevelRequest = None
+):
     return ableton.send_command("set_send_level", {
         "track_index": track_index,
         "send_index": send_index,
@@ -1046,7 +1176,7 @@ def set_send_level(track_index: int, send_index: int, req: SendLevelRequest):
     })
 
 @app.put("/api/returns/{return_index}/volume")
-def set_return_volume(return_index: int, req: ReturnVolumeRequest):
+def set_return_volume(return_index: int = Path(..., ge=0, le=MAX_SEND_INDEX), req: ReturnVolumeRequest = None):
     return ableton.send_command("set_return_volume", {"return_index": return_index, "volume": req.volume})
 
 # Recording
@@ -1083,7 +1213,11 @@ def get_scale_notes(root: str, scale_type: str, octave: int = 4):
     return ableton.send_command("get_scale_notes", {"root": root_midi, "scale_type": scale_type})
 
 @app.post("/api/tracks/{track_index}/clips/{clip_index}/quantize")
-def quantize_clip(track_index: int, clip_index: int, req: QuantizeRequest):
+def quantize_clip(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    req: QuantizeRequest = None
+):
     return ableton.send_command("quantize_clip_notes", {
         "track_index": track_index,
         "clip_index": clip_index,
@@ -1092,7 +1226,11 @@ def quantize_clip(track_index: int, clip_index: int, req: QuantizeRequest):
     })
 
 @app.post("/api/tracks/{track_index}/clips/{clip_index}/humanize/timing")
-def humanize_timing(track_index: int, clip_index: int, req: HumanizeTimingRequest):
+def humanize_timing(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    req: HumanizeTimingRequest = None
+):
     return ableton.send_command("humanize_clip_timing", {
         "track_index": track_index,
         "clip_index": clip_index,
@@ -1100,7 +1238,11 @@ def humanize_timing(track_index: int, clip_index: int, req: HumanizeTimingReques
     })
 
 @app.post("/api/tracks/{track_index}/clips/{clip_index}/humanize/velocity")
-def humanize_velocity(track_index: int, clip_index: int, req: HumanizeVelocityRequest):
+def humanize_velocity(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    req: HumanizeVelocityRequest = None
+):
     return ableton.send_command("humanize_clip_velocity", {
         "track_index": track_index,
         "clip_index": clip_index,
@@ -1236,7 +1378,7 @@ def focus_view(view_name: str):
     return ableton.send_command("focus_view", {"view_name": view_name})
 
 @app.post("/api/tracks/{track_index}/select")
-def select_track(track_index: int):
+def select_track(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX)):
     """Select a track"""
     return ableton.send_command("select_track", {"track_index": track_index})
 
@@ -1283,17 +1425,21 @@ def delete_locator(index: int):
 # ============================================================================
 
 @app.get("/api/tracks/{track_index}/routing/input")
-def get_track_input_routing(track_index: int):
+def get_track_input_routing(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX)):
     """Get track input routing"""
     return ableton.send_command("get_track_input_routing", {"track_index": track_index})
 
 @app.get("/api/tracks/{track_index}/routing/output")
-def get_track_output_routing(track_index: int):
+def get_track_output_routing(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX)):
     """Get track output routing"""
     return ableton.send_command("get_track_output_routing", {"track_index": track_index})
 
 @app.put("/api/tracks/{track_index}/routing/input")
-def set_track_input_routing(track_index: int, routing_type: str, routing_channel: str = ""):
+def set_track_input_routing(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    routing_type: str = Query(...),
+    routing_channel: str = Query("")
+):
     """Set track input routing"""
     return ableton.send_command("set_track_input_routing", {
         "track_index": track_index,
@@ -1302,7 +1448,11 @@ def set_track_input_routing(track_index: int, routing_type: str, routing_channel
     })
 
 @app.put("/api/tracks/{track_index}/routing/output")
-def set_track_output_routing(track_index: int, routing_type: str, routing_channel: str = ""):
+def set_track_output_routing(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    routing_type: str = Query(...),
+    routing_channel: str = Query("")
+):
     """Set track output routing"""
     return ableton.send_command("set_track_output_routing", {
         "track_index": track_index,

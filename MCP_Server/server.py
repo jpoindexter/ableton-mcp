@@ -2234,6 +2234,46 @@ def load_item_to_return(ctx: Context, return_index: int, uri: str) -> str:
 # ==================== AUDIO CLIP EDITING ====================
 
 @mcp.tool()
+def get_clip_gain(ctx: Context, track_index: int, clip_index: int) -> str:
+    """
+    Get the gain of an audio clip.
+
+    Parameters:
+    - track_index: The index of the track
+    - clip_index: The index of the clip slot
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_clip_gain", {
+            "track_index": track_index,
+            "clip_index": clip_index
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting clip gain: {str(e)}")
+        return f"Error getting clip gain: {str(e)}"
+
+@mcp.tool()
+def get_clip_pitch(ctx: Context, track_index: int, clip_index: int) -> str:
+    """
+    Get the pitch shift of an audio clip.
+
+    Parameters:
+    - track_index: The index of the track
+    - clip_index: The index of the clip slot
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_clip_pitch", {
+            "track_index": track_index,
+            "clip_index": clip_index
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting clip pitch: {str(e)}")
+        return f"Error getting clip pitch: {str(e)}"
+
+@mcp.tool()
 def set_clip_gain(ctx: Context, track_index: int, clip_index: int, gain: float) -> str:
     """
     Set the gain of an audio clip.
