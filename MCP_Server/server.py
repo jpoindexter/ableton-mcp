@@ -2103,6 +2103,399 @@ def load_item_to_return(ctx: Context, return_index: int, uri: str) -> str:
         logger.error(f"Error loading item to return track: {str(e)}")
         return f"Error loading item to return track: {str(e)}"
 
+# ==================== AUDIO CLIP EDITING ====================
+
+@mcp.tool()
+def set_clip_gain(ctx: Context, track_index: int, clip_index: int, gain: float) -> str:
+    """
+    Set the gain of an audio clip.
+
+    Parameters:
+    - track_index: The index of the track
+    - clip_index: The index of the clip slot
+    - gain: Gain in dB (e.g., -6.0 for -6dB, 3.0 for +3dB)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_clip_gain", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "gain": gain
+        })
+        if "error" in result:
+            return f"Error: {result.get('error')}"
+        return f"Set clip gain to {gain}dB"
+    except Exception as e:
+        logger.error(f"Error setting clip gain: {str(e)}")
+        return f"Error setting clip gain: {str(e)}"
+
+@mcp.tool()
+def set_clip_pitch(ctx: Context, track_index: int, clip_index: int, pitch: int) -> str:
+    """
+    Set the pitch shift of an audio clip.
+
+    Parameters:
+    - track_index: The index of the track
+    - clip_index: The index of the clip slot
+    - pitch: Pitch shift in semitones (-48 to +48)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_clip_pitch", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "pitch": pitch
+        })
+        if "error" in result:
+            return f"Error: {result.get('error')}"
+        return f"Set clip pitch to {pitch} semitones"
+    except Exception as e:
+        logger.error(f"Error setting clip pitch: {str(e)}")
+        return f"Error setting clip pitch: {str(e)}"
+
+@mcp.tool()
+def set_clip_warp_mode(ctx: Context, track_index: int, clip_index: int, warp_mode: str) -> str:
+    """
+    Set the warp mode of an audio clip.
+
+    Parameters:
+    - track_index: The index of the track
+    - clip_index: The index of the clip slot
+    - warp_mode: Warp mode (beats, tones, texture, repitch, complex, complex_pro)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_clip_warp_mode", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "warp_mode": warp_mode
+        })
+        if "error" in result:
+            return f"Error: {result.get('error')}"
+        return f"Set clip warp mode to {warp_mode}"
+    except Exception as e:
+        logger.error(f"Error setting warp mode: {str(e)}")
+        return f"Error setting warp mode: {str(e)}"
+
+@mcp.tool()
+def get_clip_warp_info(ctx: Context, track_index: int, clip_index: int) -> str:
+    """
+    Get warp information for an audio clip.
+
+    Parameters:
+    - track_index: The index of the track
+    - clip_index: The index of the clip slot
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_clip_warp_info", {
+            "track_index": track_index,
+            "clip_index": clip_index
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting warp info: {str(e)}")
+        return f"Error getting warp info: {str(e)}"
+
+# ==================== CLIP AUTOMATION ====================
+
+@mcp.tool()
+def get_clip_automation(ctx: Context, track_index: int, clip_index: int, parameter_name: str) -> str:
+    """
+    Get automation data for a clip parameter.
+
+    Parameters:
+    - track_index: The index of the track
+    - clip_index: The index of the clip slot
+    - parameter_name: Name of the parameter to get automation for
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_clip_automation", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "parameter_name": parameter_name
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting clip automation: {str(e)}")
+        return f"Error getting clip automation: {str(e)}"
+
+@mcp.tool()
+def set_clip_automation(ctx: Context, track_index: int, clip_index: int, parameter_name: str, envelope_data: list) -> str:
+    """
+    Set automation for a clip parameter.
+
+    Parameters:
+    - track_index: The index of the track
+    - clip_index: The index of the clip slot
+    - parameter_name: Name of the parameter to automate
+    - envelope_data: List of points [{"time": 0.0, "value": 0.5}, ...]
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_clip_automation", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "parameter_name": parameter_name,
+            "envelope_data": envelope_data
+        })
+        if "error" in result:
+            return f"Error: {result.get('error')}"
+        return f"Set automation with {result.get('points_added', 0)} points"
+    except Exception as e:
+        logger.error(f"Error setting clip automation: {str(e)}")
+        return f"Error setting clip automation: {str(e)}"
+
+@mcp.tool()
+def clear_clip_automation(ctx: Context, track_index: int, clip_index: int, parameter_name: str) -> str:
+    """
+    Clear automation for a clip parameter.
+
+    Parameters:
+    - track_index: The index of the track
+    - clip_index: The index of the clip slot
+    - parameter_name: Name of the parameter to clear automation for
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("clear_clip_automation", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "parameter_name": parameter_name
+        })
+        if "error" in result:
+            return f"Error: {result.get('error')}"
+        return f"Cleared automation for {parameter_name}"
+    except Exception as e:
+        logger.error(f"Error clearing clip automation: {str(e)}")
+        return f"Error clearing clip automation: {str(e)}"
+
+# ==================== GROUP TRACKS ====================
+
+@mcp.tool()
+def create_group_track(ctx: Context, track_indices: list, name: str = "Group") -> str:
+    """
+    Create a group track containing the specified tracks.
+
+    Parameters:
+    - track_indices: List of track indices to group
+    - name: Name for the group track
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("create_group_track", {
+            "track_indices": track_indices,
+            "name": name
+        })
+        if "error" in result:
+            return f"Error: {result.get('error')}"
+        return f"Created group '{name}' at index {result.get('group_track_index')}"
+    except Exception as e:
+        logger.error(f"Error creating group track: {str(e)}")
+        return f"Error creating group track: {str(e)}"
+
+@mcp.tool()
+def fold_track(ctx: Context, track_index: int) -> str:
+    """
+    Fold (collapse) a group track.
+
+    Parameters:
+    - track_index: The index of the group track
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("fold_track", {"track_index": track_index})
+        if "error" in result:
+            return f"Error: {result.get('error')}"
+        return f"Folded track {track_index}"
+    except Exception as e:
+        logger.error(f"Error folding track: {str(e)}")
+        return f"Error folding track: {str(e)}"
+
+@mcp.tool()
+def unfold_track(ctx: Context, track_index: int) -> str:
+    """
+    Unfold (expand) a group track.
+
+    Parameters:
+    - track_index: The index of the group track
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("unfold_track", {"track_index": track_index})
+        if "error" in result:
+            return f"Error: {result.get('error')}"
+        return f"Unfolded track {track_index}"
+    except Exception as e:
+        logger.error(f"Error unfolding track: {str(e)}")
+        return f"Error unfolding track: {str(e)}"
+
+# ==================== TRACK MONITORING ====================
+
+@mcp.tool()
+def set_track_monitoring(ctx: Context, track_index: int, monitoring: str) -> str:
+    """
+    Set the monitoring mode of a track.
+
+    Parameters:
+    - track_index: The index of the track
+    - monitoring: Monitoring mode (in, auto, off)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_track_monitoring", {
+            "track_index": track_index,
+            "monitoring": monitoring
+        })
+        if "error" in result:
+            return f"Error: {result.get('error')}"
+        return f"Set track {track_index} monitoring to {monitoring}"
+    except Exception as e:
+        logger.error(f"Error setting track monitoring: {str(e)}")
+        return f"Error setting track monitoring: {str(e)}"
+
+@mcp.tool()
+def get_track_monitoring(ctx: Context, track_index: int) -> str:
+    """
+    Get the monitoring mode of a track.
+
+    Parameters:
+    - track_index: The index of the track
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_track_monitoring", {"track_index": track_index})
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting track monitoring: {str(e)}")
+        return f"Error getting track monitoring: {str(e)}"
+
+# ==================== DEVICE PRESETS & RACK CHAINS ====================
+
+@mcp.tool()
+def get_device_by_name(ctx: Context, track_index: int, device_name: str) -> str:
+    """
+    Find a device by name and get its parameters.
+
+    Parameters:
+    - track_index: The index of the track
+    - device_name: The name of the device to find
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_device_by_name", {
+            "track_index": track_index,
+            "device_name": device_name
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting device by name: {str(e)}")
+        return f"Error getting device by name: {str(e)}"
+
+@mcp.tool()
+def get_rack_chains(ctx: Context, track_index: int, device_index: int) -> str:
+    """
+    Get chains from an instrument or effect rack.
+
+    Parameters:
+    - track_index: The index of the track
+    - device_index: The index of the rack device
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_rack_chains", {
+            "track_index": track_index,
+            "device_index": device_index
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting rack chains: {str(e)}")
+        return f"Error getting rack chains: {str(e)}"
+
+@mcp.tool()
+def select_rack_chain(ctx: Context, track_index: int, device_index: int, chain_index: int) -> str:
+    """
+    Select a chain in a rack device.
+
+    Parameters:
+    - track_index: The index of the track
+    - device_index: The index of the rack device
+    - chain_index: The index of the chain to select
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("select_rack_chain", {
+            "track_index": track_index,
+            "device_index": device_index,
+            "chain_index": chain_index
+        })
+        if "error" in result:
+            return f"Error: {result.get('error')}"
+        return f"Selected chain '{result.get('chain_name')}'"
+    except Exception as e:
+        logger.error(f"Error selecting rack chain: {str(e)}")
+        return f"Error selecting rack chain: {str(e)}"
+
+# ==================== GROOVE POOL ====================
+
+@mcp.tool()
+def get_groove_pool(ctx: Context) -> str:
+    """Get available grooves from the groove pool."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_groove_pool", {})
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting groove pool: {str(e)}")
+        return f"Error getting groove pool: {str(e)}"
+
+@mcp.tool()
+def apply_groove(ctx: Context, track_index: int, clip_index: int, groove_index: int) -> str:
+    """
+    Apply a groove to a clip.
+
+    Parameters:
+    - track_index: The index of the track
+    - clip_index: The index of the clip slot
+    - groove_index: The index of the groove from the groove pool
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("apply_groove", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "groove_index": groove_index
+        })
+        if "error" in result:
+            return f"Error: {result.get('error')}"
+        return f"Applied groove '{result.get('groove_name')}' to clip"
+    except Exception as e:
+        logger.error(f"Error applying groove: {str(e)}")
+        return f"Error applying groove: {str(e)}"
+
+@mcp.tool()
+def commit_groove(ctx: Context, track_index: int, clip_index: int) -> str:
+    """
+    Commit groove quantization to clip notes (make it permanent).
+
+    Parameters:
+    - track_index: The index of the track
+    - clip_index: The index of the clip slot
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("commit_groove", {
+            "track_index": track_index,
+            "clip_index": clip_index
+        })
+        if "error" in result:
+            return f"Error: {result.get('error')}"
+        return "Committed groove to clip"
+    except Exception as e:
+        logger.error(f"Error committing groove: {str(e)}")
+        return f"Error committing groove: {str(e)}"
+
 # Main execution
 def main():
     """Run the MCP server"""

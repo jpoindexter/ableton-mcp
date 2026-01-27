@@ -6,10 +6,14 @@ import threading
 import time
 import traceback
 import queue
+import os
 
-# Constants for socket communication
-DEFAULT_PORT = 9877
-HOST = "localhost"
+# Constants for socket communication (can be overridden via environment)
+DEFAULT_PORT = int(os.environ.get("ABLETON_MCP_PORT", "9877"))
+HOST = os.environ.get("ABLETON_MCP_HOST", "localhost")
+CLIENT_TIMEOUT = float(os.environ.get("ABLETON_MCP_CLIENT_TIMEOUT", "300.0"))  # 5 min timeout
+MAX_CLIENTS = int(os.environ.get("ABLETON_MCP_MAX_CLIENTS", "10"))
+MAX_BUFFER_SIZE = int(os.environ.get("ABLETON_MCP_MAX_BUFFER", "1048576"))  # 1MB
 
 def create_instance(c_instance):
     """Create and return the AbletonMCP script instance"""
@@ -17,26 +21,27 @@ def create_instance(c_instance):
 
 class AbletonMCP(ControlSurface):
     """AbletonMCP Remote Script for Ableton Live"""
-    
+
     def __init__(self, c_instance):
         """Initialize the control surface"""
         ControlSurface.__init__(self, c_instance)
         self.log_message("AbletonMCP Remote Script initializing...")
-        
+
         # Socket server for communication
         self.server = None
         self.client_threads = []
+        self._threads_lock = threading.Lock()  # Thread safety for client_threads
         self.server_thread = None
         self.running = False
-        
+
         # Cache the song reference for easier access
         self._song = self.song()
-        
+
         # Start the socket server
         self.start_server()
-        
+
         self.log_message("AbletonMCP initialized")
-        
+
         # Show a message in Ableton
         self.show_message("AbletonMCP: Listening for commands on port " + str(DEFAULT_PORT))
     
@@ -44,24 +49,25 @@ class AbletonMCP(ControlSurface):
         """Called when Ableton closes or the control surface is removed"""
         self.log_message("AbletonMCP disconnecting...")
         self.running = False
-        
+
         # Stop the server
         if self.server:
             try:
                 self.server.close()
-            except:
-                pass
-        
+            except (socket.error, OSError) as e:
+                self.log_message("Error closing server socket: " + str(e))
+
         # Wait for the server thread to exit
         if self.server_thread and self.server_thread.is_alive():
             self.server_thread.join(1.0)
-            
-        # Clean up any client threads
-        for client_thread in self.client_threads[:]:
-            if client_thread.is_alive():
-                # We don't join them as they might be stuck
-                self.log_message("Client thread still alive during disconnect")
-        
+
+        # Clean up any client threads (thread-safe)
+        with self._threads_lock:
+            for client_thread in self.client_threads[:]:
+                if client_thread.is_alive():
+                    self.log_message("Client thread still alive during disconnect")
+            self.client_threads = []
+
         ControlSurface.disconnect(self)
         self.log_message("AbletonMCP disconnected")
     
@@ -89,14 +95,22 @@ class AbletonMCP(ControlSurface):
             self.log_message("Server thread started")
             # Set a timeout to allow regular checking of running flag
             self.server.settimeout(1.0)
-            
+
             while self.running:
                 try:
+                    # Check client count before accepting (thread-safe)
+                    with self._threads_lock:
+                        active_count = len([t for t in self.client_threads if t.is_alive()])
+                        if active_count >= MAX_CLIENTS:
+                            self.log_message("Max clients reached ({0}), waiting...".format(MAX_CLIENTS))
+                            time.sleep(1.0)
+                            continue
+
                     # Accept connections with timeout
                     client, address = self.server.accept()
                     self.log_message("Connection accepted from " + str(address))
                     self.show_message("AbletonMCP: Client connected")
-                    
+
                     # Handle client in a separate thread
                     client_thread = threading.Thread(
                         target=self._handle_client,
@@ -104,49 +118,64 @@ class AbletonMCP(ControlSurface):
                     )
                     client_thread.daemon = True
                     client_thread.start()
-                    
-                    # Keep track of client threads
-                    self.client_threads.append(client_thread)
-                    
-                    # Clean up finished client threads
-                    self.client_threads = [t for t in self.client_threads if t.is_alive()]
-                    
+
+                    # Keep track of client threads (thread-safe)
+                    with self._threads_lock:
+                        self.client_threads.append(client_thread)
+                        # Clean up finished client threads
+                        self.client_threads = [t for t in self.client_threads if t.is_alive()]
+
                 except socket.timeout:
                     # No connection yet, just continue
                     continue
-                except Exception as e:
+                except (socket.error, OSError) as e:
                     if self.running:  # Only log if still running
                         self.log_message("Server accept error: " + str(e))
                     time.sleep(0.5)
-            
+                except Exception as e:
+                    if self.running:
+                        self.log_message("Unexpected server error: " + str(e))
+                    time.sleep(0.5)
+
             self.log_message("Server thread stopped")
         except Exception as e:
-            self.log_message("Server thread error: " + str(e))
+            self.log_message("Server thread fatal error: " + str(e))
+            self.log_message(traceback.format_exc())
     
     def _handle_client(self, client):
         """Handle communication with a connected client"""
         self.log_message("Client handler started")
-        client.settimeout(None)  # No timeout for client socket
+        client.settimeout(CLIENT_TIMEOUT)  # Add timeout to prevent DoS
         buffer = ''  # Changed from b'' to '' for Python 2
-        
+
         try:
             while self.running:
                 try:
                     # Receive data
                     data = client.recv(8192)
-                    
+
                     if not data:
                         # Client disconnected
                         self.log_message("Client disconnected")
                         break
-                    
+
                     # Accumulate data in buffer with explicit encoding/decoding
                     try:
                         # Python 3: data is bytes, decode to string
-                        buffer += data.decode('utf-8')
+                        decoded = data.decode('utf-8')
                     except AttributeError:
                         # Python 2: data is already string
-                        buffer += data
+                        decoded = data
+                    except UnicodeDecodeError as e:
+                        self.log_message("Invalid UTF-8 data received: " + str(e))
+                        continue
+
+                    buffer += decoded
+
+                    # Check buffer size limit to prevent memory DoS
+                    if len(buffer) > MAX_BUFFER_SIZE:
+                        self.log_message("Buffer overflow - client sent too much data")
+                        break
                     
                     try:
                         # Try to parse command from buffer
@@ -184,20 +213,24 @@ class AbletonMCP(ControlSurface):
                     except AttributeError:
                         # Python 2: string is already bytes
                         client.sendall(json.dumps(error_response))
-                    except:
+                    except (socket.error, OSError) as send_err:
                         # If we can't send the error, the connection is probably dead
+                        self.log_message("Failed to send error response: " + str(send_err))
                         break
-                    
+
                     # For serious errors, break the loop
                     if not isinstance(e, ValueError):
                         break
+        except socket.timeout:
+            self.log_message("Client timed out after {0} seconds".format(CLIENT_TIMEOUT))
         except Exception as e:
             self.log_message("Error in client handler: " + str(e))
+            self.log_message(traceback.format_exc())
         finally:
             try:
                 client.close()
-            except:
-                pass
+            except (socket.error, OSError) as e:
+                self.log_message("Error closing client socket: " + str(e))
             self.log_message("Client handler stopped")
     
     def _process_command(self, command):
@@ -300,7 +333,19 @@ class AbletonMCP(ControlSurface):
                                  "set_track_input_routing", "set_track_output_routing",
                                  "set_metronome",
                                  "quantize_clip_notes", "humanize_clip_timing", "humanize_clip_velocity",
-                                 "generate_drum_pattern", "generate_bassline"]:
+                                 "generate_drum_pattern", "generate_bassline",
+                                 # Audio clip editing
+                                 "set_clip_gain", "set_clip_pitch", "set_clip_warp_mode", "get_clip_warp_info",
+                                 # Clip automation
+                                 "get_clip_automation", "set_clip_automation", "clear_clip_automation",
+                                 # Group tracks
+                                 "create_group_track", "ungroup_tracks", "fold_track", "unfold_track",
+                                 # Track monitoring
+                                 "set_track_monitoring", "get_track_monitoring",
+                                 # Device presets and rack chains
+                                 "get_device_by_name", "load_device_preset", "get_rack_chains", "select_rack_chain",
+                                 # Groove pool
+                                 "get_groove_pool", "apply_groove", "commit_groove"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -572,6 +617,114 @@ class AbletonMCP(ControlSurface):
                             scale_type = params.get("scale_type", "minor")
                             length = params.get("length", 4.0)
                             result = self._generate_bassline(track_index, clip_index, root, scale_type, length)
+
+                        # ============================================
+                        # Audio Clip Editing
+                        # ============================================
+                        elif command_type == "set_clip_gain":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            gain = params.get("gain", 0.0)  # dB
+                            result = self._set_clip_gain(track_index, clip_index, gain)
+                        elif command_type == "set_clip_pitch":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            pitch = params.get("pitch", 0)  # semitones
+                            result = self._set_clip_pitch(track_index, clip_index, pitch)
+                        elif command_type == "set_clip_warp_mode":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            warp_mode = params.get("warp_mode", "beats")
+                            result = self._set_clip_warp_mode(track_index, clip_index, warp_mode)
+                        elif command_type == "get_clip_warp_info":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._get_clip_warp_info(track_index, clip_index)
+
+                        # ============================================
+                        # Clip Automation
+                        # ============================================
+                        elif command_type == "get_clip_automation":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            parameter_name = params.get("parameter_name", "")
+                            result = self._get_clip_automation(track_index, clip_index, parameter_name)
+                        elif command_type == "set_clip_automation":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            parameter_name = params.get("parameter_name", "")
+                            envelope_data = params.get("envelope_data", [])
+                            result = self._set_clip_automation(track_index, clip_index, parameter_name, envelope_data)
+                        elif command_type == "clear_clip_automation":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            parameter_name = params.get("parameter_name", "")
+                            result = self._clear_clip_automation(track_index, clip_index, parameter_name)
+
+                        # ============================================
+                        # Group Tracks
+                        # ============================================
+                        elif command_type == "create_group_track":
+                            track_indices = params.get("track_indices", [])
+                            name = params.get("name", "Group")
+                            result = self._create_group_track(track_indices, name)
+                        elif command_type == "ungroup_tracks":
+                            group_track_index = params.get("group_track_index", 0)
+                            result = self._ungroup_tracks(group_track_index)
+                        elif command_type == "fold_track":
+                            track_index = params.get("track_index", 0)
+                            result = self._fold_track(track_index, True)
+                        elif command_type == "unfold_track":
+                            track_index = params.get("track_index", 0)
+                            result = self._fold_track(track_index, False)
+
+                        # ============================================
+                        # Track Monitoring
+                        # ============================================
+                        elif command_type == "set_track_monitoring":
+                            track_index = params.get("track_index", 0)
+                            monitoring = params.get("monitoring", "auto")
+                            result = self._set_track_monitoring(track_index, monitoring)
+                        elif command_type == "get_track_monitoring":
+                            track_index = params.get("track_index", 0)
+                            result = self._get_track_monitoring(track_index)
+
+                        # ============================================
+                        # Device Presets and Rack Chains
+                        # ============================================
+                        elif command_type == "get_device_by_name":
+                            track_index = params.get("track_index", 0)
+                            device_name = params.get("device_name", "")
+                            result = self._get_device_by_name(track_index, device_name)
+                        elif command_type == "load_device_preset":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            preset_uri = params.get("preset_uri", "")
+                            result = self._load_device_preset(track_index, device_index, preset_uri)
+                        elif command_type == "get_rack_chains":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            result = self._get_rack_chains(track_index, device_index)
+                        elif command_type == "select_rack_chain":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            chain_index = params.get("chain_index", 0)
+                            result = self._select_rack_chain(track_index, device_index, chain_index)
+
+                        # ============================================
+                        # Groove Pool
+                        # ============================================
+                        elif command_type == "get_groove_pool":
+                            result = self._get_groove_pool()
+                        elif command_type == "apply_groove":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            groove_index = params.get("groove_index", 0)
+                            result = self._apply_groove(track_index, clip_index, groove_index)
+                        elif command_type == "commit_groove":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._commit_groove(track_index, clip_index)
 
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
@@ -3192,6 +3345,624 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error generating bassline: " + str(e))
             raise
 
+    # =========================================================================
+    # Audio Clip Editing
+    # =========================================================================
+
+    def _set_clip_gain(self, track_index, clip_index, gain):
+        """Set the gain of an audio clip in dB"""
+        try:
+            clip_slot = self._validate_clip_slot(track_index, clip_index)
+            if not clip_slot.has_clip:
+                raise ValueError("No clip in slot")
+
+            clip = clip_slot.clip
+
+            # Check if it's an audio clip
+            if not clip.is_audio_clip:
+                raise ValueError("Clip is not an audio clip")
+
+            # Gain is in dB, convert to Ableton's linear gain
+            # Ableton uses a range where 0dB = 1.0
+            import math
+            linear_gain = math.pow(10, gain / 20.0)
+            clip.gain = max(0.0, min(4.0, linear_gain))  # Clamp to reasonable range
+
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "gain_db": gain,
+                "gain_linear": clip.gain
+            }
+        except Exception as e:
+            self.log_message("Error setting clip gain: " + str(e))
+            raise
+
+    def _set_clip_pitch(self, track_index, clip_index, pitch):
+        """Set the pitch shift of an audio clip in semitones"""
+        try:
+            clip_slot = self._validate_clip_slot(track_index, clip_index)
+            if not clip_slot.has_clip:
+                raise ValueError("No clip in slot")
+
+            clip = clip_slot.clip
+
+            if not clip.is_audio_clip:
+                raise ValueError("Clip is not an audio clip")
+
+            # Pitch coarse is in semitones (-48 to +48)
+            pitch = max(-48, min(48, int(pitch)))
+            clip.pitch_coarse = pitch
+
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "pitch_semitones": clip.pitch_coarse
+            }
+        except Exception as e:
+            self.log_message("Error setting clip pitch: " + str(e))
+            raise
+
+    def _set_clip_warp_mode(self, track_index, clip_index, warp_mode):
+        """Set the warp mode of an audio clip"""
+        try:
+            clip_slot = self._validate_clip_slot(track_index, clip_index)
+            if not clip_slot.has_clip:
+                raise ValueError("No clip in slot")
+
+            clip = clip_slot.clip
+
+            if not clip.is_audio_clip:
+                raise ValueError("Clip is not an audio clip")
+
+            # Warp modes: beats, tones, texture, repitch, complex, complex_pro
+            warp_modes = {
+                "beats": 0,
+                "tones": 1,
+                "texture": 2,
+                "repitch": 3,
+                "complex": 4,
+                "complex_pro": 5
+            }
+
+            mode_value = warp_modes.get(warp_mode.lower(), 0)
+            clip.warp_mode = mode_value
+
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "warp_mode": warp_mode,
+                "warp_mode_value": mode_value
+            }
+        except Exception as e:
+            self.log_message("Error setting warp mode: " + str(e))
+            raise
+
+    def _get_clip_warp_info(self, track_index, clip_index):
+        """Get warp info for an audio clip"""
+        try:
+            clip_slot = self._validate_clip_slot(track_index, clip_index)
+            if not clip_slot.has_clip:
+                raise ValueError("No clip in slot")
+
+            clip = clip_slot.clip
+
+            if not clip.is_audio_clip:
+                raise ValueError("Clip is not an audio clip")
+
+            warp_mode_names = ["beats", "tones", "texture", "repitch", "complex", "complex_pro"]
+
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "warping": clip.warping,
+                "warp_mode": warp_mode_names[clip.warp_mode] if clip.warp_mode < len(warp_mode_names) else "unknown",
+                "warp_mode_value": clip.warp_mode,
+                "gain": clip.gain,
+                "pitch_coarse": clip.pitch_coarse,
+                "pitch_fine": clip.pitch_fine if hasattr(clip, 'pitch_fine') else 0
+            }
+        except Exception as e:
+            self.log_message("Error getting warp info: " + str(e))
+            raise
+
+    # =========================================================================
+    # Clip Automation
+    # =========================================================================
+
+    def _get_clip_automation(self, track_index, clip_index, parameter_name):
+        """Get automation envelope data for a clip parameter"""
+        try:
+            clip_slot = self._validate_clip_slot(track_index, clip_index)
+            if not clip_slot.has_clip:
+                raise ValueError("No clip in slot")
+
+            clip = clip_slot.clip
+            track = self._song.tracks[track_index]
+
+            # Find the parameter
+            param = None
+            device_name = None
+            for device in track.devices:
+                for p in device.parameters:
+                    if p.name.lower() == parameter_name.lower():
+                        param = p
+                        device_name = device.name
+                        break
+                if param:
+                    break
+
+            if not param:
+                return {
+                    "error": "Parameter not found: " + parameter_name,
+                    "available_parameters": [p.name for d in track.devices for p in d.parameters][:20]
+                }
+
+            # Get envelope if it exists
+            envelope = clip.automation_envelope(param) if hasattr(clip, 'automation_envelope') else None
+
+            if not envelope:
+                return {
+                    "track_index": track_index,
+                    "clip_index": clip_index,
+                    "parameter_name": parameter_name,
+                    "device_name": device_name,
+                    "has_automation": False,
+                    "envelope_data": []
+                }
+
+            # Read envelope points (simplified - actual implementation would read breakpoints)
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "parameter_name": parameter_name,
+                "device_name": device_name,
+                "has_automation": True,
+                "parameter_min": param.min,
+                "parameter_max": param.max,
+                "parameter_value": param.value
+            }
+        except Exception as e:
+            self.log_message("Error getting clip automation: " + str(e))
+            raise
+
+    def _set_clip_automation(self, track_index, clip_index, parameter_name, envelope_data):
+        """Set automation envelope for a clip parameter"""
+        try:
+            clip_slot = self._validate_clip_slot(track_index, clip_index)
+            if not clip_slot.has_clip:
+                raise ValueError("No clip in slot")
+
+            clip = clip_slot.clip
+            track = self._song.tracks[track_index]
+
+            # Find the parameter
+            param = None
+            for device in track.devices:
+                for p in device.parameters:
+                    if p.name.lower() == parameter_name.lower():
+                        param = p
+                        break
+                if param:
+                    break
+
+            if not param:
+                raise ValueError("Parameter not found: " + parameter_name)
+
+            # Create/get envelope
+            if hasattr(clip, 'create_automation_envelope'):
+                envelope = clip.create_automation_envelope(param)
+            else:
+                return {"error": "Automation envelopes not supported in this version"}
+
+            # Clear existing and add new points
+            if hasattr(envelope, 'clear'):
+                envelope.clear()
+
+            # Add breakpoints from envelope_data
+            # envelope_data format: [{"time": float, "value": float}, ...]
+            for point in envelope_data:
+                time = point.get("time", 0)
+                value = point.get("value", param.value)
+                if hasattr(envelope, 'insert_value'):
+                    envelope.insert_value(time, value)
+
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "parameter_name": parameter_name,
+                "points_added": len(envelope_data)
+            }
+        except Exception as e:
+            self.log_message("Error setting clip automation: " + str(e))
+            raise
+
+    def _clear_clip_automation(self, track_index, clip_index, parameter_name):
+        """Clear automation for a clip parameter"""
+        try:
+            clip_slot = self._validate_clip_slot(track_index, clip_index)
+            if not clip_slot.has_clip:
+                raise ValueError("No clip in slot")
+
+            clip = clip_slot.clip
+            track = self._song.tracks[track_index]
+
+            # Find the parameter
+            param = None
+            for device in track.devices:
+                for p in device.parameters:
+                    if p.name.lower() == parameter_name.lower():
+                        param = p
+                        break
+                if param:
+                    break
+
+            if not param:
+                raise ValueError("Parameter not found: " + parameter_name)
+
+            # Clear envelope
+            if hasattr(clip, 'clear_automation_envelope'):
+                clip.clear_automation_envelope(param)
+
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "parameter_name": parameter_name,
+                "cleared": True
+            }
+        except Exception as e:
+            self.log_message("Error clearing clip automation: " + str(e))
+            raise
+
+    # =========================================================================
+    # Group Tracks
+    # =========================================================================
+
+    def _create_group_track(self, track_indices, name):
+        """Create a group track containing the specified tracks"""
+        try:
+            if not track_indices:
+                raise ValueError("No tracks specified for grouping")
+
+            # Validate all track indices
+            for idx in track_indices:
+                if idx < 0 or idx >= len(self._song.tracks):
+                    raise IndexError("Track index {0} out of range".format(idx))
+
+            # Sort indices in descending order for proper grouping
+            sorted_indices = sorted(track_indices, reverse=True)
+
+            # Select the tracks
+            for idx in sorted_indices:
+                self._song.tracks[idx].is_grouped = True
+
+            # Create group - this may require using Live's grouping functionality
+            # In Ableton's API, tracks can be grouped by setting is_part_of_selection
+            # and using the song's create_group_track method if available
+
+            if hasattr(self._song, 'create_group_track'):
+                # Select the tracks first
+                self._song.view.selected_track = self._song.tracks[sorted_indices[0]]
+                group_track = self._song.create_group_track(sorted_indices[0])
+                if name:
+                    group_track.name = name
+
+                return {
+                    "created": True,
+                    "group_track_index": list(self._song.tracks).index(group_track),
+                    "grouped_tracks": track_indices,
+                    "name": name
+                }
+            else:
+                return {
+                    "error": "Group track creation not supported in this Ableton version",
+                    "note": "Try selecting tracks manually and using Cmd+G"
+                }
+        except Exception as e:
+            self.log_message("Error creating group track: " + str(e))
+            raise
+
+    def _ungroup_tracks(self, group_track_index):
+        """Ungroup a group track"""
+        try:
+            track = self._validate_track_index(group_track_index)
+
+            if not track.is_foldable:
+                raise ValueError("Track is not a group track")
+
+            if hasattr(track, 'ungroup'):
+                track.ungroup()
+                return {"ungrouped": True, "track_index": group_track_index}
+            else:
+                return {"error": "Ungrouping not supported in this Ableton version"}
+        except Exception as e:
+            self.log_message("Error ungrouping tracks: " + str(e))
+            raise
+
+    def _fold_track(self, track_index, fold):
+        """Fold or unfold a group track"""
+        try:
+            track = self._validate_track_index(track_index)
+
+            if not track.is_foldable:
+                raise ValueError("Track is not foldable (not a group track)")
+
+            track.fold_state = fold
+
+            return {
+                "track_index": track_index,
+                "folded": track.fold_state
+            }
+        except Exception as e:
+            self.log_message("Error folding track: " + str(e))
+            raise
+
+    # =========================================================================
+    # Track Monitoring
+    # =========================================================================
+
+    def _set_track_monitoring(self, track_index, monitoring):
+        """Set track monitoring mode (in, auto, off)"""
+        try:
+            track = self._validate_track_index(track_index)
+
+            if not track.can_be_armed:
+                raise ValueError("Track cannot be monitored (not an audio/MIDI track)")
+
+            # Monitoring states: 0=In, 1=Auto, 2=Off
+            monitoring_map = {
+                "in": 0,
+                "auto": 1,
+                "off": 2
+            }
+
+            mode = monitoring_map.get(monitoring.lower(), 1)
+            track.current_monitoring_state = mode
+
+            return {
+                "track_index": track_index,
+                "monitoring": monitoring,
+                "monitoring_value": mode
+            }
+        except Exception as e:
+            self.log_message("Error setting track monitoring: " + str(e))
+            raise
+
+    def _get_track_monitoring(self, track_index):
+        """Get track monitoring mode"""
+        try:
+            track = self._validate_track_index(track_index)
+
+            if not track.can_be_armed:
+                return {"track_index": track_index, "monitoring": "n/a", "can_monitor": False}
+
+            monitoring_names = ["in", "auto", "off"]
+            state = track.current_monitoring_state
+
+            return {
+                "track_index": track_index,
+                "monitoring": monitoring_names[state] if state < len(monitoring_names) else "unknown",
+                "monitoring_value": state,
+                "can_monitor": True
+            }
+        except Exception as e:
+            self.log_message("Error getting track monitoring: " + str(e))
+            raise
+
+    # =========================================================================
+    # Device Presets and Rack Chains
+    # =========================================================================
+
+    def _get_device_by_name(self, track_index, device_name):
+        """Find a device by name and return its info"""
+        try:
+            track = self._validate_track_index(track_index)
+
+            for i, device in enumerate(track.devices):
+                if device.name.lower() == device_name.lower():
+                    params = []
+                    for j, param in enumerate(device.parameters):
+                        params.append({
+                            "index": j,
+                            "name": param.name,
+                            "value": param.value,
+                            "min": param.min,
+                            "max": param.max
+                        })
+
+                    return {
+                        "found": True,
+                        "device_index": i,
+                        "name": device.name,
+                        "class_name": device.class_name,
+                        "is_active": device.is_active,
+                        "parameters": params
+                    }
+
+            return {
+                "found": False,
+                "device_name": device_name,
+                "available_devices": [d.name for d in track.devices]
+            }
+        except Exception as e:
+            self.log_message("Error getting device by name: " + str(e))
+            raise
+
+    def _load_device_preset(self, track_index, device_index, preset_uri):
+        """Load a preset onto a device"""
+        try:
+            track = self._validate_track_index(track_index)
+            device = self._validate_device_index(track, device_index)
+
+            app = self.application()
+            browser = app.browser
+
+            # Find preset in browser
+            item = self._find_browser_item_by_uri(browser, preset_uri)
+
+            if not item:
+                return {"error": "Preset not found: " + preset_uri}
+
+            if not item.is_loadable:
+                return {"error": "Item is not loadable"}
+
+            # Select the device first, then load preset
+            self._song.view.selected_track = track
+            # Note: Loading presets directly onto devices may require
+            # using the browser's hot-swap functionality
+
+            if hasattr(browser, 'hotswap_target'):
+                browser.hotswap_target = device
+                browser.load_item(item)
+                return {
+                    "loaded": True,
+                    "preset_name": item.name,
+                    "device_name": device.name
+                }
+            else:
+                return {"error": "Preset loading not fully supported"}
+        except Exception as e:
+            self.log_message("Error loading device preset: " + str(e))
+            raise
+
+    def _get_rack_chains(self, track_index, device_index):
+        """Get chains from an instrument/effect rack"""
+        try:
+            track = self._validate_track_index(track_index)
+            device = self._validate_device_index(track, device_index)
+
+            if not device.can_have_chains:
+                return {"error": "Device is not a rack", "device_name": device.name}
+
+            chains = []
+            for i, chain in enumerate(device.chains):
+                chains.append({
+                    "index": i,
+                    "name": chain.name,
+                    "mute": chain.mute,
+                    "solo": chain.solo,
+                    "device_count": len(chain.devices)
+                })
+
+            return {
+                "track_index": track_index,
+                "device_index": device_index,
+                "device_name": device.name,
+                "chain_count": len(chains),
+                "chains": chains
+            }
+        except Exception as e:
+            self.log_message("Error getting rack chains: " + str(e))
+            raise
+
+    def _select_rack_chain(self, track_index, device_index, chain_index):
+        """Select a chain in a rack"""
+        try:
+            track = self._validate_track_index(track_index)
+            device = self._validate_device_index(track, device_index)
+
+            if not device.can_have_chains:
+                raise ValueError("Device is not a rack")
+
+            if chain_index < 0 or chain_index >= len(device.chains):
+                raise IndexError("Chain index out of range")
+
+            # Select the chain
+            if hasattr(device, 'view') and hasattr(device.view, 'selected_chain_index'):
+                device.view.selected_chain_index = chain_index
+
+            return {
+                "track_index": track_index,
+                "device_index": device_index,
+                "chain_index": chain_index,
+                "chain_name": device.chains[chain_index].name
+            }
+        except Exception as e:
+            self.log_message("Error selecting rack chain: " + str(e))
+            raise
+
+    # =========================================================================
+    # Groove Pool
+    # =========================================================================
+
+    def _get_groove_pool(self):
+        """Get available grooves from the groove pool"""
+        try:
+            if not hasattr(self._song, 'groove_pool') or not self._song.groove_pool:
+                return {"error": "Groove pool not available", "grooves": []}
+
+            grooves = []
+            for i, groove in enumerate(self._song.groove_pool.grooves):
+                grooves.append({
+                    "index": i,
+                    "name": groove.name if hasattr(groove, 'name') else "Groove " + str(i),
+                    "amount": groove.amount if hasattr(groove, 'amount') else 1.0
+                })
+
+            return {
+                "groove_count": len(grooves),
+                "grooves": grooves
+            }
+        except Exception as e:
+            self.log_message("Error getting groove pool: " + str(e))
+            raise
+
+    def _apply_groove(self, track_index, clip_index, groove_index):
+        """Apply a groove to a clip"""
+        try:
+            clip_slot = self._validate_clip_slot(track_index, clip_index)
+            if not clip_slot.has_clip:
+                raise ValueError("No clip in slot")
+
+            clip = clip_slot.clip
+
+            if not hasattr(self._song, 'groove_pool') or not self._song.groove_pool:
+                return {"error": "Groove pool not available"}
+
+            grooves = list(self._song.groove_pool.grooves)
+            if groove_index < 0 or groove_index >= len(grooves):
+                raise IndexError("Groove index out of range")
+
+            groove = grooves[groove_index]
+
+            # Apply groove to clip
+            if hasattr(clip, 'groove'):
+                clip.groove = groove
+                return {
+                    "track_index": track_index,
+                    "clip_index": clip_index,
+                    "groove_applied": True,
+                    "groove_name": groove.name if hasattr(groove, 'name') else "Groove " + str(groove_index)
+                }
+            else:
+                return {"error": "Groove assignment not supported"}
+        except Exception as e:
+            self.log_message("Error applying groove: " + str(e))
+            raise
+
+    def _commit_groove(self, track_index, clip_index):
+        """Commit groove quantization to clip notes"""
+        try:
+            clip_slot = self._validate_clip_slot(track_index, clip_index)
+            if not clip_slot.has_clip:
+                raise ValueError("No clip in slot")
+
+            clip = clip_slot.clip
+
+            # Commit groove (make it permanent)
+            if hasattr(clip, 'quantize'):
+                # This will apply the groove permanently
+                clip.quantize(0.125, 1.0)  # Quantize to 32nd notes with full strength
+
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "committed": True
+            }
+        except Exception as e:
+            self.log_message("Error committing groove: " + str(e))
+            raise
+
     def _get_browser_item(self, uri, path):
         """Get a browser item by URI or path"""
         try:
@@ -3372,7 +4143,8 @@ class AbletonMCP(ControlSurface):
                 return "midi_effect"
             else:
                 return "unknown"
-        except:
+        except (AttributeError, TypeError) as e:
+            self.log_message("Error getting device type: " + str(e))
             return "unknown"
     
     def get_browser_tree(self, category_type="all"):

@@ -14,12 +14,14 @@ Or: uvicorn rest_api_server:app --host 0.0.0.0 --port 8000
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, Field
 from typing import Optional, List, Dict, Any
 import socket
 import json
 import logging
 import uvicorn
+import threading
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO,
@@ -27,104 +29,231 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger("AbletonRESTAPI")
 
 # ============================================================================
-# Ableton Connection
+# Configuration (can be overridden via environment variables)
+# ============================================================================
+
+ABLETON_HOST = os.environ.get("ABLETON_HOST", "localhost")
+ABLETON_PORT = int(os.environ.get("ABLETON_PORT", "9877"))
+MAX_RETRIES = int(os.environ.get("ABLETON_MAX_RETRIES", "2"))
+CONNECT_TIMEOUT = float(os.environ.get("ABLETON_CONNECT_TIMEOUT", "5.0"))
+RECV_TIMEOUT = float(os.environ.get("ABLETON_RECV_TIMEOUT", "15.0"))
+MAX_BUFFER_SIZE = int(os.environ.get("ABLETON_MAX_BUFFER", "1048576"))  # 1MB max
+
+# Command whitelist for security
+ALLOWED_COMMANDS = {
+    # Transport
+    "health_check", "start_playback", "stop_playback", "get_playback_position",
+    "get_session_info", "set_tempo", "undo", "redo",
+    # Tracks
+    "create_midi_track", "create_audio_track", "delete_track", "duplicate_track",
+    "get_track_info", "set_track_name", "set_track_mute", "set_track_solo",
+    "set_track_arm", "set_track_volume", "set_track_pan", "set_track_color",
+    "select_track", "get_track_input_routing", "get_track_output_routing",
+    "set_track_input_routing", "set_track_output_routing",
+    "get_available_inputs", "get_available_outputs",
+    "set_track_monitoring", "get_track_monitoring",
+    # Clips
+    "create_clip", "delete_clip", "fire_clip", "stop_clip", "duplicate_clip",
+    "get_clip_info", "get_clip_notes", "set_clip_name", "set_clip_color",
+    "set_clip_loop", "add_notes_to_clip", "remove_notes", "remove_all_notes",
+    "transpose_notes", "select_clip",
+    # Audio clip editing
+    "set_clip_gain", "set_clip_pitch", "set_clip_warp_mode", "get_clip_warp_info",
+    # Scenes
+    "get_all_scenes", "create_scene", "delete_scene", "fire_scene", "stop_scene",
+    "duplicate_scene", "set_scene_name", "set_scene_color", "select_scene",
+    # Devices
+    "get_device_parameters", "set_device_parameter", "toggle_device", "delete_device",
+    "get_device_by_name", "load_device_preset",
+    # Rack chains
+    "get_rack_chains", "select_rack_chain", "create_rack_chain", "delete_rack_chain",
+    # Browser
+    "browse_path", "get_browser_children", "search_browser", "get_browser_tree",
+    "get_browser_items_at_path", "load_browser_item", "load_instrument_or_effect",
+    "load_browser_item_to_return",
+    # Return tracks
+    "get_return_tracks", "get_return_track_info", "set_send_level",
+    "set_return_volume", "set_return_pan",
+    # Master track
+    "get_master_info", "set_master_volume", "set_master_pan",
+    # Recording
+    "start_recording", "stop_recording", "toggle_session_record",
+    "toggle_arrangement_record", "set_overdub", "capture_midi",
+    # Arrangement
+    "get_arrangement_length", "set_arrangement_loop", "jump_to_time",
+    "get_locators", "create_locator", "delete_locator",
+    # View
+    "get_current_view", "focus_view",
+    # Session info
+    "get_session_path", "is_session_modified", "get_cpu_load",
+    "get_metronome_state", "set_metronome",
+    # AI helpers
+    "get_scale_notes", "quantize_clip_notes", "humanize_clip_timing",
+    "humanize_clip_velocity", "generate_drum_pattern", "generate_bassline",
+    # Automation
+    "get_clip_automation", "set_clip_automation", "clear_clip_automation",
+    # Group tracks
+    "create_group_track", "ungroup_tracks", "fold_track", "unfold_track",
+    # Groove
+    "get_groove_pool", "apply_groove", "commit_groove",
+}
+
+# ============================================================================
+# Ableton Connection (Thread-Safe)
 # ============================================================================
 
 class AbletonConnection:
-    def __init__(self, host: str = "localhost", port: int = 9877):
+    def __init__(self, host: str = ABLETON_HOST, port: int = ABLETON_PORT):
         self.host = host
         self.port = port
         self.sock = None
-        self._max_retries = 2
+        self._max_retries = MAX_RETRIES
+        self._lock = threading.Lock()  # Thread safety
 
     def connect(self) -> bool:
+        """Connect to Ableton (must be called within lock)"""
         if self.sock:
             return True
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.settimeout(5.0)
+            self.sock.settimeout(CONNECT_TIMEOUT)
             self.sock.connect((self.host, self.port))
             logger.info(f"Connected to Ableton at {self.host}:{self.port}")
             return True
+        except socket.error as e:
+            logger.error(f"Socket error connecting to Ableton: {str(e)}")
+            if self.sock:
+                try:
+                    self.sock.close()
+                except socket.error:
+                    pass
+            self.sock = None
+            return False
         except Exception as e:
-            logger.error(f"Failed to connect to Ableton: {str(e)}")
+            logger.error(f"Unexpected error connecting to Ableton: {str(e)}")
+            if self.sock:
+                try:
+                    self.sock.close()
+                except socket.error:
+                    pass
             self.sock = None
             return False
 
     def disconnect(self):
+        """Disconnect from Ableton (must be called within lock)"""
         if self.sock:
             try:
                 self.sock.close()
-            except:
-                pass
-            self.sock = None
+            except socket.error as e:
+                logger.warning(f"Error closing socket: {str(e)}")
+            finally:
+                self.sock = None
 
     def _reconnect(self) -> bool:
-        """Force a reconnection"""
+        """Force a reconnection (must be called within lock)"""
         self.disconnect()
         return self.connect()
 
     def send_command(self, command_type: str, params: dict = None) -> dict:
+        """Send command to Ableton (thread-safe with validation)"""
+
+        # Validate command is allowed
+        if command_type not in ALLOWED_COMMANDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown command: {command_type}. Use /api/commands to see available commands."
+            )
+
         last_error = None
 
-        for attempt in range(self._max_retries + 1):
-            if not self.connect():
-                if attempt < self._max_retries:
-                    logger.warning(f"Connection failed, retrying ({attempt + 1}/{self._max_retries})")
-                    continue
-                raise HTTPException(
-                    status_code=503,
-                    detail="Could not connect to Ableton. Make sure Live is running with the AbletonMCP control surface enabled."
-                )
+        with self._lock:  # Thread-safe socket access
+            for attempt in range(self._max_retries + 1):
+                if not self.connect():
+                    if attempt < self._max_retries:
+                        logger.warning(f"Connection failed, retrying ({attempt + 1}/{self._max_retries})")
+                        continue
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"Could not connect to Ableton at {self.host}:{self.port}. Make sure Live is running with the AbletonMCP control surface enabled."
+                    )
 
-            command = {"type": command_type, "params": params or {}}
+                command = {"type": command_type, "params": params or {}}
 
-            try:
-                self.sock.sendall(json.dumps(command).encode('utf-8'))
-                self.sock.settimeout(15.0)
+                try:
+                    # Serialize and send
+                    command_json = json.dumps(command)
+                    if len(command_json) > MAX_BUFFER_SIZE:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Command too large: {len(command_json)} bytes (max {MAX_BUFFER_SIZE})"
+                        )
 
-                chunks = []
-                while True:
-                    try:
-                        chunk = self.sock.recv(8192)
-                        if not chunk:
-                            break
-                        chunks.append(chunk)
+                    self.sock.sendall(command_json.encode('utf-8'))
+                    self.sock.settimeout(RECV_TIMEOUT)
+
+                    # Receive with size limit
+                    chunks = []
+                    total_size = 0
+
+                    while True:
                         try:
-                            json.loads(b''.join(chunks).decode('utf-8'))
-                            break
-                        except json.JSONDecodeError:
-                            continue
-                    except socket.timeout:
-                        break
+                            chunk = self.sock.recv(8192)
+                            if not chunk:
+                                break
 
-                if not chunks:
-                    raise Exception("No response from Ableton")
+                            total_size += len(chunk)
+                            if total_size > MAX_BUFFER_SIZE:
+                                raise HTTPException(
+                                    status_code=500,
+                                    detail=f"Response too large (>{MAX_BUFFER_SIZE} bytes)"
+                                )
 
-                response_data = b''.join(chunks)
-                response = json.loads(response_data.decode('utf-8'))
+                            chunks.append(chunk)
 
-                if response.get("status") == "error":
-                    error_msg = response.get("message", "Unknown error from Ableton")
-                    raise HTTPException(status_code=400, detail=error_msg)
+                            # Try to parse - if valid JSON, we're done
+                            try:
+                                json.loads(b''.join(chunks).decode('utf-8'))
+                                break
+                            except json.JSONDecodeError:
+                                continue
 
-                return response.get("result", {})
+                        except socket.timeout:
+                            if chunks:
+                                break  # Got partial data, try to use it
+                            raise Exception("Timeout waiting for response from Ableton")
 
-            except HTTPException:
-                raise
-            except json.JSONDecodeError as e:
-                last_error = f"Invalid response from Ableton: {str(e)}"
-                self._reconnect()
-            except Exception as e:
-                last_error = str(e)
-                self._reconnect()
-                if attempt < self._max_retries:
-                    logger.warning(f"Command failed, retrying ({attempt + 1}/{self._max_retries}): {last_error}")
+                    if not chunks:
+                        raise Exception("No response from Ableton")
 
-        raise HTTPException(status_code=500, detail=f"Command failed after retries: {last_error}")
+                    response_data = b''.join(chunks)
+                    response = json.loads(response_data.decode('utf-8'))
+
+                    if response.get("status") == "error":
+                        error_msg = response.get("message", "Unknown error from Ableton")
+                        raise HTTPException(status_code=400, detail=error_msg)
+
+                    return response.get("result", {})
+
+                except HTTPException:
+                    raise
+                except json.JSONDecodeError as e:
+                    last_error = f"Invalid JSON response from Ableton: {str(e)}"
+                    self._reconnect()
+                except socket.error as e:
+                    last_error = f"Socket error: {str(e)}"
+                    self._reconnect()
+                    if attempt < self._max_retries:
+                        logger.warning(f"Command failed, retrying ({attempt + 1}/{self._max_retries}): {last_error}")
+                except Exception as e:
+                    last_error = str(e)
+                    self._reconnect()
+                    if attempt < self._max_retries:
+                        logger.warning(f"Command failed, retrying ({attempt + 1}/{self._max_retries}): {last_error}")
+
+        raise HTTPException(status_code=500, detail=f"Command failed after {self._max_retries} retries: {last_error}")
 
 
-# Global connection
+# Global connection (thread-safe)
 ableton = AbletonConnection()
 
 # ============================================================================
@@ -137,12 +266,16 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# CORS configuration - restrict to local development by default
+# Set CORS_ORIGINS environment variable to allow additional origins
+CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=False,  # Disable credentials for security
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 # Global exception handler for cleaner error responses
@@ -415,6 +548,11 @@ def get_tools():
     """Return OpenAI/Ollama compatible tool definitions"""
     return {"tools": TOOL_DEFINITIONS}
 
+@app.get("/api/commands")
+def list_commands():
+    """List all available commands"""
+    return {"commands": sorted(list(ALLOWED_COMMANDS)), "count": len(ALLOWED_COMMANDS)}
+
 # Transport & Session
 @app.get("/api/session")
 def get_session_info():
@@ -531,6 +669,39 @@ def duplicate_clip(track_index: int, clip_index: int, req: ClipDuplicateRequest)
         "target_index": req.target_index
     })
 
+@app.put("/api/tracks/{track_index}/clips/{clip_index}/name")
+def set_clip_name(track_index: int, clip_index: int, req: ClipNameRequest):
+    return ableton.send_command("set_clip_name", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "name": req.name
+    })
+
+@app.put("/api/tracks/{track_index}/clips/{clip_index}/color")
+def set_clip_color(track_index: int, clip_index: int, req: ClipColorRequest):
+    return ableton.send_command("set_clip_color", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "color": req.color
+    })
+
+@app.put("/api/tracks/{track_index}/clips/{clip_index}/loop")
+def set_clip_loop(track_index: int, clip_index: int, req: ClipLoopRequest):
+    return ableton.send_command("set_clip_loop", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "loop_start": req.loop_start,
+        "loop_end": req.loop_end,
+        "looping": req.looping
+    })
+
+@app.post("/api/tracks/{track_index}/clips/{clip_index}/select")
+def select_clip(track_index: int, clip_index: int):
+    return ableton.send_command("select_clip", {
+        "track_index": track_index,
+        "clip_index": clip_index
+    })
+
 # Notes
 @app.get("/api/tracks/{track_index}/clips/{clip_index}/notes")
 def get_clip_notes(track_index: int, clip_index: int):
@@ -581,6 +752,18 @@ def stop_scene(scene_index: int):
 @app.post("/api/scenes/{scene_index}/duplicate")
 def duplicate_scene(scene_index: int):
     return ableton.send_command("duplicate_scene", {"scene_index": scene_index})
+
+@app.put("/api/scenes/{scene_index}/name")
+def set_scene_name(scene_index: int, req: SceneNameRequest):
+    return ableton.send_command("set_scene_name", {"scene_index": scene_index, "name": req.name})
+
+@app.put("/api/scenes/{scene_index}/color")
+def set_scene_color(scene_index: int, color: int):
+    return ableton.send_command("set_scene_color", {"scene_index": scene_index, "color": color})
+
+@app.post("/api/scenes/{scene_index}/select")
+def select_scene(scene_index: int):
+    return ableton.send_command("select_scene", {"scene_index": scene_index})
 
 # Devices
 @app.get("/api/tracks/{track_index}/devices/{device_index}")
@@ -649,8 +832,13 @@ NOTE_TO_MIDI = {"C": 0, "C#": 1, "DB": 1, "D": 2, "D#": 3, "EB": 3, "E": 4, "F":
 @app.get("/api/music/scale")
 def get_scale_notes(root: str, scale_type: str, octave: int = 4):
     # Convert string root to MIDI note number
-    root_upper = root.upper().replace("♯", "#").replace("♭", "B")
-    root_midi = NOTE_TO_MIDI.get(root_upper, 0) + (octave * 12)
+    # Fix: ♭ should map to "b" for flat (e.g., Bb, Eb), not uppercase "B"
+    root_normalized = root.upper().replace("♯", "#").replace("♭", "b")
+    # Handle flat notes: Bb -> A#, Eb -> D#, etc. (enharmonic equivalents)
+    flat_to_sharp = {"Bb": "A#", "Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#"}
+    if root_normalized in flat_to_sharp:
+        root_normalized = flat_to_sharp[root_normalized]
+    root_midi = NOTE_TO_MIDI.get(root_normalized, 0) + (octave * 12)
     return ableton.send_command("get_scale_notes", {"root": root_midi, "scale_type": scale_type})
 
 @app.post("/api/tracks/{track_index}/clips/{clip_index}/quantize")
@@ -791,6 +979,143 @@ def load_item_to_return(req: LoadItemToReturnRequest):
         "return_index": req.return_index,
         "item_uri": req.uri
     })
+
+# ============================================================================
+# View & Selection
+# ============================================================================
+
+@app.get("/api/view")
+def get_current_view():
+    """Get current view state (selected track, scene, etc.)"""
+    return ableton.send_command("get_current_view")
+
+@app.post("/api/view/focus")
+def focus_view(view_name: str):
+    """Focus a specific view (Session, Arranger, Detail, etc.)"""
+    return ableton.send_command("focus_view", {"view_name": view_name})
+
+@app.post("/api/tracks/{track_index}/select")
+def select_track(track_index: int):
+    """Select a track"""
+    return ableton.send_command("select_track", {"track_index": track_index})
+
+# ============================================================================
+# Arrangement
+# ============================================================================
+
+@app.get("/api/arrangement/length")
+def get_arrangement_length():
+    """Get arrangement length and loop settings"""
+    return ableton.send_command("get_arrangement_length")
+
+@app.post("/api/arrangement/loop")
+def set_arrangement_loop(loop_start: float, loop_length: float, loop_on: bool = True):
+    """Set arrangement loop region"""
+    return ableton.send_command("set_arrangement_loop", {
+        "loop_start": loop_start,
+        "loop_length": loop_length,
+        "loop_on": loop_on
+    })
+
+@app.post("/api/arrangement/jump")
+def jump_to_time(time: float):
+    """Jump to a specific time in the arrangement"""
+    return ableton.send_command("jump_to_time", {"time": time})
+
+@app.get("/api/arrangement/locators")
+def get_locators():
+    """Get all locators/markers"""
+    return ableton.send_command("get_locators")
+
+@app.post("/api/arrangement/locators")
+def create_locator(time: float, name: str = ""):
+    """Create a locator at specified time"""
+    return ableton.send_command("create_locator", {"time": time, "name": name})
+
+@app.delete("/api/arrangement/locators/{index}")
+def delete_locator(index: int):
+    """Delete a locator by index"""
+    return ableton.send_command("delete_locator", {"index": index})
+
+# ============================================================================
+# I/O Routing
+# ============================================================================
+
+@app.get("/api/tracks/{track_index}/routing/input")
+def get_track_input_routing(track_index: int):
+    """Get track input routing"""
+    return ableton.send_command("get_track_input_routing", {"track_index": track_index})
+
+@app.get("/api/tracks/{track_index}/routing/output")
+def get_track_output_routing(track_index: int):
+    """Get track output routing"""
+    return ableton.send_command("get_track_output_routing", {"track_index": track_index})
+
+@app.put("/api/tracks/{track_index}/routing/input")
+def set_track_input_routing(track_index: int, routing_type: str, routing_channel: str = ""):
+    """Set track input routing"""
+    return ableton.send_command("set_track_input_routing", {
+        "track_index": track_index,
+        "routing_type": routing_type,
+        "routing_channel": routing_channel
+    })
+
+@app.put("/api/tracks/{track_index}/routing/output")
+def set_track_output_routing(track_index: int, routing_type: str, routing_channel: str = ""):
+    """Set track output routing"""
+    return ableton.send_command("set_track_output_routing", {
+        "track_index": track_index,
+        "routing_type": routing_type,
+        "routing_channel": routing_channel
+    })
+
+@app.get("/api/routing/inputs")
+def get_available_inputs():
+    """Get available audio/MIDI inputs"""
+    return ableton.send_command("get_available_inputs")
+
+@app.get("/api/routing/outputs")
+def get_available_outputs():
+    """Get available audio/MIDI outputs"""
+    return ableton.send_command("get_available_outputs")
+
+# ============================================================================
+# Recording
+# ============================================================================
+
+@app.post("/api/recording/toggle-session")
+def toggle_session_record():
+    """Toggle session record mode"""
+    return ableton.send_command("toggle_session_record")
+
+@app.post("/api/recording/toggle-arrangement")
+def toggle_arrangement_record():
+    """Toggle arrangement record mode"""
+    return ableton.send_command("toggle_arrangement_record")
+
+# ============================================================================
+# Session Info
+# ============================================================================
+
+@app.get("/api/session/path")
+def get_session_path():
+    """Get file path of current session"""
+    return ableton.send_command("get_session_path")
+
+@app.get("/api/session/modified")
+def is_session_modified():
+    """Check if session has unsaved changes"""
+    return ableton.send_command("is_session_modified")
+
+@app.get("/api/session/cpu")
+def get_cpu_load():
+    """Get current CPU load"""
+    return ableton.send_command("get_cpu_load")
+
+@app.get("/api/transport/position")
+def get_playback_position():
+    """Get current playback position"""
+    return ableton.send_command("get_playback_position")
 
 # ============================================================================
 # Generic Command Endpoint (for Ollama function calling)
