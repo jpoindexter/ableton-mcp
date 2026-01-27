@@ -233,6 +233,15 @@ class AbletonMCP(ControlSurface):
             # Scene queries
             elif command_type == "get_all_scenes":
                 response["result"] = self._get_all_scenes()
+            # Return track queries
+            elif command_type == "get_return_tracks":
+                response["result"] = self._get_return_tracks()
+            elif command_type == "get_return_track_info":
+                return_index = params.get("return_index", 0)
+                response["result"] = self._get_return_track_info(return_index)
+            # View queries
+            elif command_type == "get_current_view":
+                response["result"] = self._get_current_view()
             # Commands that modify Live's state should be scheduled on the main thread
             elif command_type in ["create_midi_track", "create_audio_track", "set_track_name",
                                  "set_track_mute", "set_track_solo", "set_track_arm",
@@ -245,7 +254,11 @@ class AbletonMCP(ControlSurface):
                                  "set_device_parameter", "toggle_device", "delete_device",
                                  "create_scene", "delete_scene", "fire_scene", "stop_scene",
                                  "set_scene_name", "set_scene_color", "duplicate_scene",
-                                 "undo", "redo"]:
+                                 "undo", "redo",
+                                 "set_send_level", "set_return_volume", "set_return_pan",
+                                 "focus_view", "select_track", "select_scene", "select_clip",
+                                 "start_recording", "stop_recording", "toggle_session_record",
+                                 "toggle_arrangement_record", "set_overdub", "capture_midi"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -407,6 +420,48 @@ class AbletonMCP(ControlSurface):
                             result = self._undo()
                         elif command_type == "redo":
                             result = self._redo()
+                        # Return/send track control
+                        elif command_type == "set_send_level":
+                            track_index = params.get("track_index", 0)
+                            send_index = params.get("send_index", 0)
+                            level = params.get("level", 0.0)
+                            result = self._set_send_level(track_index, send_index, level)
+                        elif command_type == "set_return_volume":
+                            return_index = params.get("return_index", 0)
+                            volume = params.get("volume", 0.85)
+                            result = self._set_return_volume(return_index, volume)
+                        elif command_type == "set_return_pan":
+                            return_index = params.get("return_index", 0)
+                            pan = params.get("pan", 0.0)
+                            result = self._set_return_pan(return_index, pan)
+                        # View control
+                        elif command_type == "focus_view":
+                            view_name = params.get("view_name", "Session")
+                            result = self._focus_view(view_name)
+                        elif command_type == "select_track":
+                            track_index = params.get("track_index", 0)
+                            result = self._select_track(track_index)
+                        elif command_type == "select_scene":
+                            scene_index = params.get("scene_index", 0)
+                            result = self._select_scene(scene_index)
+                        elif command_type == "select_clip":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._select_clip(track_index, clip_index)
+                        # Recording control
+                        elif command_type == "start_recording":
+                            result = self._start_recording()
+                        elif command_type == "stop_recording":
+                            result = self._stop_recording()
+                        elif command_type == "toggle_session_record":
+                            result = self._toggle_session_record()
+                        elif command_type == "toggle_arrangement_record":
+                            result = self._toggle_arrangement_record()
+                        elif command_type == "set_overdub":
+                            enabled = params.get("enabled", False)
+                            result = self._set_overdub(enabled)
+                        elif command_type == "capture_midi":
+                            result = self._capture_midi()
 
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
@@ -1560,6 +1615,326 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error redoing: " + str(e))
+            raise
+
+    # ==================== RETURN/SEND TRACK CONTROL ====================
+
+    def _get_return_tracks(self):
+        """Get information about all return tracks"""
+        try:
+            return_tracks = []
+            for i, track in enumerate(self._song.return_tracks):
+                track_info = {
+                    "index": i,
+                    "name": track.name,
+                    "color_index": track.color_index if hasattr(track, 'color_index') else None,
+                    "mute": track.mute,
+                    "solo": track.solo,
+                    "volume": track.mixer_device.volume.value,
+                    "panning": track.mixer_device.panning.value,
+                    "device_count": len(track.devices)
+                }
+                return_tracks.append(track_info)
+
+            result = {
+                "return_track_count": len(return_tracks),
+                "return_tracks": return_tracks
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting return tracks: " + str(e))
+            raise
+
+    def _get_return_track_info(self, return_index):
+        """Get detailed information about a return track"""
+        try:
+            if return_index < 0 or return_index >= len(self._song.return_tracks):
+                raise IndexError("Return track index out of range")
+
+            track = self._song.return_tracks[return_index]
+
+            devices = []
+            for i, device in enumerate(track.devices):
+                devices.append({
+                    "index": i,
+                    "name": device.name,
+                    "class_name": device.class_name
+                })
+
+            result = {
+                "index": return_index,
+                "name": track.name,
+                "color_index": track.color_index if hasattr(track, 'color_index') else None,
+                "mute": track.mute,
+                "solo": track.solo,
+                "volume": track.mixer_device.volume.value,
+                "panning": track.mixer_device.panning.value,
+                "devices": devices
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting return track info: " + str(e))
+            raise
+
+    def _set_send_level(self, track_index, send_index, level):
+        """Set the send level from a track to a return track"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+            sends = track.mixer_device.sends
+
+            if send_index < 0 or send_index >= len(sends):
+                raise IndexError("Send index out of range")
+
+            sends[send_index].value = max(0.0, min(1.0, level))
+
+            result = {
+                "track_index": track_index,
+                "send_index": send_index,
+                "level": sends[send_index].value
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error setting send level: " + str(e))
+            raise
+
+    def _set_return_volume(self, return_index, volume):
+        """Set the volume of a return track"""
+        try:
+            if return_index < 0 or return_index >= len(self._song.return_tracks):
+                raise IndexError("Return track index out of range")
+
+            track = self._song.return_tracks[return_index]
+            track.mixer_device.volume.value = max(0.0, min(1.0, volume))
+
+            result = {
+                "return_index": return_index,
+                "volume": track.mixer_device.volume.value
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error setting return volume: " + str(e))
+            raise
+
+    def _set_return_pan(self, return_index, pan):
+        """Set the panning of a return track"""
+        try:
+            if return_index < 0 or return_index >= len(self._song.return_tracks):
+                raise IndexError("Return track index out of range")
+
+            track = self._song.return_tracks[return_index]
+            track.mixer_device.panning.value = max(-1.0, min(1.0, pan))
+
+            result = {
+                "return_index": return_index,
+                "panning": track.mixer_device.panning.value
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error setting return pan: " + str(e))
+            raise
+
+    # ==================== VIEW CONTROL ====================
+
+    def _get_current_view(self):
+        """Get information about the current view state"""
+        try:
+            view = self._song.view
+            app_view = self.application().view
+
+            result = {
+                "selected_track_index": list(self._song.tracks).index(view.selected_track) if view.selected_track in self._song.tracks else -1,
+                "selected_track_name": view.selected_track.name if view.selected_track else None,
+                "selected_scene_index": list(self._song.scenes).index(view.selected_scene) if view.selected_scene else -1,
+                "selected_scene_name": view.selected_scene.name if view.selected_scene else None,
+                "is_session_visible": app_view.is_view_visible("Session") if hasattr(app_view, 'is_view_visible') else None,
+                "is_arranger_visible": app_view.is_view_visible("Arranger") if hasattr(app_view, 'is_view_visible') else None,
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting current view: " + str(e))
+            raise
+
+    def _focus_view(self, view_name):
+        """Focus a specific view (Session, Arranger, Detail, etc.)"""
+        try:
+            app_view = self.application().view
+
+            if hasattr(app_view, 'focus_view'):
+                app_view.focus_view(view_name)
+
+            result = {
+                "focused": True,
+                "view_name": view_name
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error focusing view: " + str(e))
+            raise
+
+    def _select_track(self, track_index):
+        """Select a track"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+            self._song.view.selected_track = track
+
+            result = {
+                "selected": True,
+                "track_index": track_index,
+                "track_name": track.name
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error selecting track: " + str(e))
+            raise
+
+    def _select_scene(self, scene_index):
+        """Select a scene"""
+        try:
+            if scene_index < 0 or scene_index >= len(self._song.scenes):
+                raise IndexError("Scene index out of range")
+
+            scene = self._song.scenes[scene_index]
+            self._song.view.selected_scene = scene
+
+            result = {
+                "selected": True,
+                "scene_index": scene_index,
+                "scene_name": scene.name
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error selecting scene: " + str(e))
+            raise
+
+    def _select_clip(self, track_index, clip_index):
+        """Select a clip slot"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+
+            # Select the track and scene
+            self._song.view.selected_track = track
+            if clip_index < len(self._song.scenes):
+                self._song.view.selected_scene = self._song.scenes[clip_index]
+
+            # Try to highlight the clip slot
+            clip_slot = track.clip_slots[clip_index]
+            if hasattr(self._song.view, 'highlighted_clip_slot'):
+                self._song.view.highlighted_clip_slot = clip_slot
+
+            result = {
+                "selected": True,
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "has_clip": clip_slot.has_clip
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error selecting clip: " + str(e))
+            raise
+
+    # ==================== RECORDING CONTROL ====================
+
+    def _start_recording(self):
+        """Start recording"""
+        try:
+            self._song.record_mode = True
+
+            result = {
+                "recording": self._song.record_mode
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error starting recording: " + str(e))
+            raise
+
+    def _stop_recording(self):
+        """Stop recording"""
+        try:
+            self._song.record_mode = False
+
+            result = {
+                "recording": self._song.record_mode
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error stopping recording: " + str(e))
+            raise
+
+    def _toggle_session_record(self):
+        """Toggle session record mode"""
+        try:
+            if hasattr(self._song, 'session_record'):
+                self._song.session_record = not self._song.session_record
+                result = {
+                    "session_record": self._song.session_record
+                }
+            else:
+                result = {
+                    "error": "Session record not available"
+                }
+            return result
+        except Exception as e:
+            self.log_message("Error toggling session record: " + str(e))
+            raise
+
+    def _toggle_arrangement_record(self):
+        """Toggle arrangement record mode"""
+        try:
+            self._song.record_mode = not self._song.record_mode
+
+            result = {
+                "arrangement_record": self._song.record_mode
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error toggling arrangement record: " + str(e))
+            raise
+
+    def _set_overdub(self, enabled):
+        """Set overdub mode"""
+        try:
+            if hasattr(self._song, 'overdub'):
+                self._song.overdub = enabled
+                result = {
+                    "overdub": self._song.overdub
+                }
+            else:
+                result = {
+                    "error": "Overdub not available"
+                }
+            return result
+        except Exception as e:
+            self.log_message("Error setting overdub: " + str(e))
+            raise
+
+    def _capture_midi(self):
+        """Capture MIDI that was played recently"""
+        try:
+            if hasattr(self._song, 'capture_midi'):
+                self._song.capture_midi()
+                result = {
+                    "captured": True
+                }
+            else:
+                result = {
+                    "captured": False,
+                    "error": "Capture MIDI not available"
+                }
+            return result
+        except Exception as e:
+            self.log_message("Error capturing MIDI: " + str(e))
             raise
 
     def _get_browser_item(self, uri, path):

@@ -114,7 +114,11 @@ class AbletonConnection:
             "load_browser_item",
             "create_scene", "delete_scene", "fire_scene", "stop_scene",
             "set_scene_name", "set_scene_color", "duplicate_scene",
-            "undo", "redo"
+            "undo", "redo",
+            "set_send_level", "set_return_volume", "set_return_pan",
+            "focus_view", "select_track", "select_scene", "select_clip",
+            "start_recording", "stop_recording", "toggle_session_record",
+            "toggle_arrangement_record", "set_overdub", "capture_midi"
         ]
         
         try:
@@ -1087,6 +1091,262 @@ def redo(ctx: Context) -> str:
     except Exception as e:
         logger.error(f"Error redoing: {str(e)}")
         return f"Error redoing: {str(e)}"
+
+# ==================== RETURN/SEND TRACK CONTROL ====================
+
+@mcp.tool()
+def get_return_tracks(ctx: Context) -> str:
+    """Get information about all return (aux) tracks."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_return_tracks")
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting return tracks: {str(e)}")
+        return f"Error getting return tracks: {str(e)}"
+
+@mcp.tool()
+def get_return_track_info(ctx: Context, return_index: int) -> str:
+    """
+    Get detailed information about a return track.
+
+    Parameters:
+    - return_index: The index of the return track
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_return_track_info", {"return_index": return_index})
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting return track info: {str(e)}")
+        return f"Error getting return track info: {str(e)}"
+
+@mcp.tool()
+def set_send_level(ctx: Context, track_index: int, send_index: int, level: float) -> str:
+    """
+    Set the send level from a track to a return track.
+
+    Parameters:
+    - track_index: The index of the source track
+    - send_index: The index of the send (corresponds to return track index)
+    - level: The send level (0.0 to 1.0)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_send_level", {
+            "track_index": track_index,
+            "send_index": send_index,
+            "level": level
+        })
+        return f"Set track {track_index} send {send_index} to {result.get('level')}"
+    except Exception as e:
+        logger.error(f"Error setting send level: {str(e)}")
+        return f"Error setting send level: {str(e)}"
+
+@mcp.tool()
+def set_return_volume(ctx: Context, return_index: int, volume: float) -> str:
+    """
+    Set the volume of a return track.
+
+    Parameters:
+    - return_index: The index of the return track
+    - volume: The volume level (0.0 to 1.0)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_return_volume", {
+            "return_index": return_index,
+            "volume": volume
+        })
+        return f"Set return track {return_index} volume to {result.get('volume')}"
+    except Exception as e:
+        logger.error(f"Error setting return volume: {str(e)}")
+        return f"Error setting return volume: {str(e)}"
+
+@mcp.tool()
+def set_return_pan(ctx: Context, return_index: int, pan: float) -> str:
+    """
+    Set the panning of a return track.
+
+    Parameters:
+    - return_index: The index of the return track
+    - pan: The pan position (-1.0 = left, 0.0 = center, 1.0 = right)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_return_pan", {
+            "return_index": return_index,
+            "pan": pan
+        })
+        return f"Set return track {return_index} pan to {result.get('panning')}"
+    except Exception as e:
+        logger.error(f"Error setting return pan: {str(e)}")
+        return f"Error setting return pan: {str(e)}"
+
+# ==================== VIEW CONTROL ====================
+
+@mcp.tool()
+def get_current_view(ctx: Context) -> str:
+    """Get information about the current view state (selected track, scene, etc.)."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_current_view")
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting current view: {str(e)}")
+        return f"Error getting current view: {str(e)}"
+
+@mcp.tool()
+def focus_view(ctx: Context, view_name: str) -> str:
+    """
+    Focus a specific view in Ableton.
+
+    Parameters:
+    - view_name: The name of the view (Session, Arranger, Detail, etc.)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("focus_view", {"view_name": view_name})
+        return f"Focused view: {view_name}"
+    except Exception as e:
+        logger.error(f"Error focusing view: {str(e)}")
+        return f"Error focusing view: {str(e)}"
+
+@mcp.tool()
+def select_track(ctx: Context, track_index: int) -> str:
+    """
+    Select a track.
+
+    Parameters:
+    - track_index: The index of the track to select
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("select_track", {"track_index": track_index})
+        return f"Selected track '{result.get('track_name')}' at index {track_index}"
+    except Exception as e:
+        logger.error(f"Error selecting track: {str(e)}")
+        return f"Error selecting track: {str(e)}"
+
+@mcp.tool()
+def select_scene(ctx: Context, scene_index: int) -> str:
+    """
+    Select a scene.
+
+    Parameters:
+    - scene_index: The index of the scene to select
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("select_scene", {"scene_index": scene_index})
+        return f"Selected scene '{result.get('scene_name')}' at index {scene_index}"
+    except Exception as e:
+        logger.error(f"Error selecting scene: {str(e)}")
+        return f"Error selecting scene: {str(e)}"
+
+@mcp.tool()
+def select_clip(ctx: Context, track_index: int, clip_index: int) -> str:
+    """
+    Select a clip slot.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("select_clip", {
+            "track_index": track_index,
+            "clip_index": clip_index
+        })
+        has_clip = "with clip" if result.get("has_clip") else "empty"
+        return f"Selected clip slot at track {track_index}, slot {clip_index} ({has_clip})"
+    except Exception as e:
+        logger.error(f"Error selecting clip: {str(e)}")
+        return f"Error selecting clip: {str(e)}"
+
+# ==================== RECORDING CONTROL ====================
+
+@mcp.tool()
+def start_recording(ctx: Context) -> str:
+    """Start recording in Ableton."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("start_recording")
+        return "Started recording" if result.get("recording") else "Failed to start recording"
+    except Exception as e:
+        logger.error(f"Error starting recording: {str(e)}")
+        return f"Error starting recording: {str(e)}"
+
+@mcp.tool()
+def stop_recording(ctx: Context) -> str:
+    """Stop recording in Ableton."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("stop_recording")
+        return "Stopped recording"
+    except Exception as e:
+        logger.error(f"Error stopping recording: {str(e)}")
+        return f"Error stopping recording: {str(e)}"
+
+@mcp.tool()
+def toggle_session_record(ctx: Context) -> str:
+    """Toggle session record mode."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("toggle_session_record")
+        if "error" in result:
+            return result.get("error")
+        state = "on" if result.get("session_record") else "off"
+        return f"Session record is now {state}"
+    except Exception as e:
+        logger.error(f"Error toggling session record: {str(e)}")
+        return f"Error toggling session record: {str(e)}"
+
+@mcp.tool()
+def toggle_arrangement_record(ctx: Context) -> str:
+    """Toggle arrangement record mode."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("toggle_arrangement_record")
+        state = "on" if result.get("arrangement_record") else "off"
+        return f"Arrangement record is now {state}"
+    except Exception as e:
+        logger.error(f"Error toggling arrangement record: {str(e)}")
+        return f"Error toggling arrangement record: {str(e)}"
+
+@mcp.tool()
+def set_overdub(ctx: Context, enabled: bool) -> str:
+    """
+    Set overdub mode.
+
+    Parameters:
+    - enabled: True to enable overdub, False to disable
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_overdub", {"enabled": enabled})
+        if "error" in result:
+            return result.get("error")
+        state = "enabled" if result.get("overdub") else "disabled"
+        return f"Overdub is now {state}"
+    except Exception as e:
+        logger.error(f"Error setting overdub: {str(e)}")
+        return f"Error setting overdub: {str(e)}"
+
+@mcp.tool()
+def capture_midi(ctx: Context) -> str:
+    """Capture MIDI that was played recently (like Ableton's Capture feature)."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("capture_midi")
+        if result.get("captured"):
+            return "Captured MIDI"
+        else:
+            return result.get("error", "Failed to capture MIDI")
+    except Exception as e:
+        logger.error(f"Error capturing MIDI: {str(e)}")
+        return f"Error capturing MIDI: {str(e)}"
 
 @mcp.tool()
 def get_browser_tree(ctx: Context, category_type: str = "all") -> str:
