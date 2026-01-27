@@ -136,7 +136,7 @@ class AbletonConnection:
             
             # For state-modifying commands, add a small delay to give Ableton time to process
             if is_modifying_command:
-                time.sleep(0.1)  # 100ms delay
+                time.sleep(0.05)  # 50ms delay (reduced from 100ms)
             
             # Set timeout based on command type
             timeout = 15.0 if is_modifying_command else 10.0
@@ -156,7 +156,7 @@ class AbletonConnection:
             
             # For state-modifying commands, add another small delay after receiving response
             if is_modifying_command:
-                time.sleep(0.1)  # 100ms delay
+                time.sleep(0.05)  # 50ms delay (reduced from 100ms)
             
             return response.get("result", {})
         except socket.timeout:
