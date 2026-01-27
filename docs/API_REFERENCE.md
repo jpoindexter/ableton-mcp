@@ -320,6 +320,42 @@ Set track panning.
 ### POST /tracks/{track_index}/select
 Select track for editing.
 
+### GET /tracks/{track_index}/monitoring
+Get track monitoring state.
+
+**Response:**
+```json
+{"monitoring": "in"}
+```
+
+Monitoring values: `"in"` (always monitor input), `"auto"` (monitor when armed), `"off"` (never monitor input)
+
+### PUT /tracks/{track_index}/monitoring
+Set track monitoring state.
+
+**Request:**
+```json
+{"state": "auto"}
+```
+
+**Valid values:** `"in"`, `"auto"`, `"off"`
+
+### POST /tracks/group
+Group selected tracks.
+
+**Request:**
+```json
+{"track_indices": [0, 1, 2]}
+```
+
+Creates a group track containing the specified tracks.
+
+### POST /tracks/{track_index}/fold
+Fold a group track (collapse its children).
+
+### POST /tracks/{track_index}/unfold
+Unfold a group track (expand its children).
+
 ---
 
 ## Clips
@@ -505,6 +541,38 @@ Set audio clip pitch.
 
 ---
 
+## Warp Settings (Audio Clips)
+
+### GET /tracks/{track_index}/clips/{clip_index}/warp
+Get audio clip warp settings.
+
+**Response:**
+```json
+{
+  "warping": true,
+  "warp_mode": "beats",
+  "start_marker": 0.0,
+  "end_marker": 176400.0,
+  "loop_start": 0.0,
+  "loop_end": 4.0
+}
+```
+
+### PUT /tracks/{track_index}/clips/{clip_index}/warp
+Set audio clip warp settings.
+
+**Request:**
+```json
+{
+  "warping": true,
+  "warp_mode": "complex_pro"
+}
+```
+
+**Valid warp modes:** `"beats"`, `"tones"`, `"texture"`, `"repitch"`, `"complex"`, `"complex_pro"`
+
+---
+
 ## Warp Markers (Audio Clips)
 
 ### GET /tracks/{track_index}/clips/{clip_index}/warp-markers
@@ -541,6 +609,43 @@ Delete a warp marker.
 ```json
 {"beat_time": 2.0}
 ```
+
+---
+
+## Clip Automation
+
+### GET /tracks/{track_index}/clips/{clip_index}/automation/{parameter_name}
+Get automation envelope data for a parameter.
+
+**Response:**
+```json
+{
+  "parameter": "Volume",
+  "automation_enabled": true,
+  "points": [
+    {"time": 0.0, "value": 0.85},
+    {"time": 2.0, "value": 0.5},
+    {"time": 4.0, "value": 0.85}
+  ]
+}
+```
+
+### PUT /tracks/{track_index}/clips/{clip_index}/automation/{parameter_name}
+Set automation envelope for a parameter.
+
+**Request:**
+```json
+{
+  "points": [
+    {"time": 0.0, "value": 0.85},
+    {"time": 2.0, "value": 0.5},
+    {"time": 4.0, "value": 0.85}
+  ]
+}
+```
+
+### DELETE /tracks/{track_index}/clips/{clip_index}/automation/{parameter_name}
+Clear automation for a parameter.
 
 ---
 
@@ -648,6 +753,39 @@ If `enabled` is omitted, the device state will be toggled.
 ### DELETE /tracks/{track_index}/devices/{device_index}
 Delete a device.
 
+### GET /tracks/{track_index}/devices/by-name/{device_name}
+Get device by name.
+
+**Response:**
+```json
+{
+  "index": 2,
+  "name": "EQ Eight",
+  "class_name": "PluginDevice",
+  "is_active": true,
+  "parameters": [...]
+}
+```
+
+Returns 404 if device not found on track.
+
+### GET /tracks/{track_index}/devices/{device_index}/chains
+Get chains for a rack device (Drum Rack, Instrument Rack, etc.).
+
+**Response:**
+```json
+{
+  "chains": [
+    {"index": 0, "name": "Chain 1", "mute": false, "solo": false},
+    {"index": 1, "name": "Chain 2", "mute": false, "solo": false}
+  ],
+  "count": 2
+}
+```
+
+### POST /tracks/{track_index}/devices/{device_index}/chains/{chain_index}/select
+Select a chain within a rack device.
+
 ---
 
 ## Return Tracks
@@ -699,6 +837,55 @@ Set return track pan.
 ```json
 {"pan": 0.0}
 ```
+
+### GET /returns/{return_index}
+Get detailed return track information.
+
+**Response:**
+```json
+{
+  "index": 0,
+  "name": "A-Reverb",
+  "volume": 0.85,
+  "panning": 0.0,
+  "mute": false,
+  "solo": false,
+  "devices": [...]
+}
+```
+
+---
+
+## Grooves
+
+### GET /grooves
+Get available grooves from the groove pool.
+
+**Response:**
+```json
+{
+  "grooves": [
+    {"index": 0, "name": "Swing 8", "base": 8, "amount": 0.5},
+    {"index": 1, "name": "MPC 60 16ths", "base": 16, "amount": 0.4}
+  ],
+  "count": 2
+}
+```
+
+### POST /tracks/{track_index}/clips/{clip_index}/groove
+Apply a groove to a clip.
+
+**Request:**
+```json
+{"groove_index": 0}
+```
+
+Applies the groove from the groove pool to the clip's timing.
+
+### POST /tracks/{track_index}/clips/{clip_index}/groove/commit
+Commit applied groove to clip notes.
+
+Makes the groove permanent by modifying the actual note positions.
 
 ---
 
@@ -826,6 +1013,47 @@ Load a browser item onto a return track.
 {
   "return_index": 0,
   "uri": "query:AudioEffects#Reverb"
+}
+```
+
+### GET /browser/tree
+Get the full browser tree structure.
+
+**Response:**
+```json
+{
+  "tree": {
+    "name": "Browser",
+    "children": [
+      {
+        "name": "Sounds",
+        "is_folder": true,
+        "children": [...]
+      },
+      {
+        "name": "Drums",
+        "is_folder": true,
+        "children": [...]
+      }
+    ]
+  }
+}
+```
+
+### GET /browser/items
+Get browser items at a specific path.
+
+**Query Parameters:**
+- `path` (string, optional): Path to browse (e.g., "Sounds/Bass")
+
+**Response:**
+```json
+{
+  "items": [
+    {"name": "Analog Bass", "is_folder": false, "is_loadable": true, "uri": "query:..."},
+    {"name": "Electric Bass", "is_folder": false, "is_loadable": true, "uri": "query:..."}
+  ],
+  "count": 2
 }
 ```
 

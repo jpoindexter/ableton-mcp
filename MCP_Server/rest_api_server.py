@@ -357,16 +357,20 @@ if API_KEY_ENABLED:
 # ============================================================================
 
 import time as time_module
-from collections import defaultdict
+from collections import OrderedDict
+
+# Maximum number of unique client IPs to track for rate limiting (LRU eviction)
+MAX_RATE_LIMIT_CLIENTS = int(os.environ.get("MAX_RATE_LIMIT_CLIENTS", "10000"))
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Simple in-memory rate limiter by client IP."""
+    """LRU-based in-memory rate limiter by client IP with bounded memory."""
 
-    def __init__(self, app, requests_limit: int, window_seconds: int):
+    def __init__(self, app, requests_limit: int, window_seconds: int, max_clients: int = MAX_RATE_LIMIT_CLIENTS):
         super().__init__(app)
         self.requests_limit = requests_limit
         self.window_seconds = window_seconds
-        self.request_counts = defaultdict(list)
+        self.max_clients = max_clients
+        self.request_counts = OrderedDict()  # LRU-style with bounded size
         self._lock = threading.Lock()
 
     def _get_client_ip(self, request: Request) -> str:
@@ -380,15 +384,25 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return request.client.host if request.client else "unknown"
 
     def _cleanup_old_requests(self, client_ip: str, current_time: float):
-        """Remove requests outside the time window."""
+        """Remove requests outside the time window and evict stale clients."""
         cutoff = current_time - self.window_seconds
-        self.request_counts[client_ip] = [
-            t for t in self.request_counts[client_ip] if t > cutoff
-        ]
+
+        # Clean up old timestamps for this client
+        if client_ip in self.request_counts:
+            self.request_counts[client_ip] = [
+                t for t in self.request_counts[client_ip] if t > cutoff
+            ]
+            # Remove entry entirely if no requests remain (prevents memory leak)
+            if not self.request_counts[client_ip]:
+                del self.request_counts[client_ip]
+
+        # LRU eviction: remove oldest clients if over max_clients limit
+        while len(self.request_counts) > self.max_clients:
+            self.request_counts.popitem(last=False)  # Remove oldest (FIFO order)
 
     async def dispatch(self, request: Request, call_next):
-        # Skip rate limiting for health checks
-        if request.url.path == "/api/health":
+        # Skip rate limiting for health checks and docs
+        if request.url.path in ["/api/health", "/health", "/docs", "/openapi.json", "/redoc"]:
             return await call_next(request)
 
         client_ip = self._get_client_ip(request)
@@ -396,6 +410,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         with self._lock:
             self._cleanup_old_requests(client_ip, current_time)
+
+            # Initialize if new client
+            if client_ip not in self.request_counts:
+                self.request_counts[client_ip] = []
 
             if len(self.request_counts[client_ip]) >= self.requests_limit:
                 return JSONResponse(
@@ -407,6 +425,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 )
 
             self.request_counts[client_ip].append(current_time)
+            # Move to end for LRU ordering (most recently used)
+            self.request_counts.move_to_end(client_ip)
 
         return await call_next(request)
 

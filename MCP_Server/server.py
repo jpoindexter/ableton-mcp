@@ -3,6 +3,7 @@ from mcp.server.fastmcp import FastMCP, Context
 import socket
 import json
 import logging
+import os
 import time
 import threading
 from dataclasses import dataclass, field
@@ -10,9 +11,20 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, Any, List, Union, Optional
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, 
+logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("AbletonMCPServer")
+
+# Configurable timeouts via environment variables
+MCP_RECV_TIMEOUT = float(os.environ.get("MCP_RECV_TIMEOUT", "15.0"))
+MCP_MODIFYING_CMD_TIMEOUT = float(os.environ.get("MCP_MODIFYING_CMD_TIMEOUT", "15.0"))
+MCP_READ_CMD_TIMEOUT = float(os.environ.get("MCP_READ_CMD_TIMEOUT", "10.0"))
+MCP_HEALTH_CHECK_TIMEOUT = float(os.environ.get("MCP_HEALTH_CHECK_TIMEOUT", "2.0"))
+MCP_COMMAND_DELAY = float(os.environ.get("MCP_COMMAND_DELAY", "0.05"))
+MCP_RETRY_DELAY = float(os.environ.get("MCP_RETRY_DELAY", "1.0"))
+MCP_MAX_CONNECT_ATTEMPTS = int(os.environ.get("MCP_MAX_CONNECT_ATTEMPTS", "3"))
+ABLETON_HOST = os.environ.get("ABLETON_HOST", "localhost")
+ABLETON_PORT = int(os.environ.get("ABLETON_PORT", "9877"))
 
 @dataclass
 class AbletonConnection:
@@ -48,7 +60,7 @@ class AbletonConnection:
     def receive_full_response(self, sock, buffer_size=8192):
         """Receive the complete response, potentially in multiple chunks"""
         chunks = []
-        sock.settimeout(15.0)  # Increased timeout for operations that might take longer
+        sock.settimeout(MCP_RECV_TIMEOUT)
 
         try:
             while True:
@@ -146,10 +158,10 @@ class AbletonConnection:
             
             # For state-modifying commands, add a small delay to give Ableton time to process
             if is_modifying_command:
-                time.sleep(0.05)  # 50ms delay (reduced from 100ms)
+                time.sleep(MCP_COMMAND_DELAY)
             
             # Set timeout based on command type
-            timeout = 15.0 if is_modifying_command else 10.0
+            timeout = MCP_MODIFYING_CMD_TIMEOUT if is_modifying_command else MCP_READ_CMD_TIMEOUT
             self.sock.settimeout(timeout)
             
             # Receive the response
@@ -166,7 +178,7 @@ class AbletonConnection:
             
             # For state-modifying commands, add another small delay after receiving response
             if is_modifying_command:
-                time.sleep(0.05)  # 50ms delay (reduced from 100ms)
+                time.sleep(MCP_COMMAND_DELAY)
             
             return response.get("result", {})
         except socket.timeout:
@@ -230,7 +242,7 @@ def get_ableton_connection():
             try:
                 # Test the connection with a proper health check command
                 # Empty bytes sendall() is unreliable - some implementations ignore it
-                _ableton_connection.sock.settimeout(2.0)
+                _ableton_connection.sock.settimeout(MCP_HEALTH_CHECK_TIMEOUT)
                 _ableton_connection.send_command("health_check")
                 return _ableton_connection
             except Exception as e:
@@ -243,12 +255,11 @@ def get_ableton_connection():
 
         # Connection doesn't exist or is invalid, create a new one
         if _ableton_connection is None:
-            # Try to connect up to 3 times with a short delay between attempts
-            max_attempts = 3
-            for attempt in range(1, max_attempts + 1):
+            # Try to connect with a short delay between attempts
+            for attempt in range(1, MCP_MAX_CONNECT_ATTEMPTS + 1):
                 try:
-                    logger.info(f"Connecting to Ableton (attempt {attempt}/{max_attempts})...")
-                    _ableton_connection = AbletonConnection(host="localhost", port=9877)
+                    logger.info(f"Connecting to Ableton (attempt {attempt}/{MCP_MAX_CONNECT_ATTEMPTS})...")
+                    _ableton_connection = AbletonConnection(host=ABLETON_HOST, port=ABLETON_PORT)
                     if _ableton_connection.connect():
                         logger.info("Created new persistent connection to Ableton")
 
@@ -272,8 +283,8 @@ def get_ableton_connection():
                         _ableton_connection = None
 
                 # Wait before trying again, but only if we have more attempts left
-                if attempt < max_attempts:
-                    time.sleep(1.0)
+                if attempt < MCP_MAX_CONNECT_ATTEMPTS:
+                    time.sleep(MCP_RETRY_DELAY)
 
             # If we get here, all connection attempts failed
             if _ableton_connection is None:

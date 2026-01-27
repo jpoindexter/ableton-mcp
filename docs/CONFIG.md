@@ -16,6 +16,21 @@ This document describes all configuration options for AbletonMCP.
 | `RATE_LIMIT_REQUESTS` | `100` | Maximum requests per time window |
 | `RATE_LIMIT_WINDOW` | `60` | Time window in seconds |
 | `TRUST_PROXY_HEADERS` | `false` | Trust X-Forwarded-For headers for client IP. **Only enable when behind a trusted reverse proxy!** |
+| `MAX_RATE_LIMIT_CLIENTS` | `10000` | Maximum number of unique client IPs to track for rate limiting (LRU eviction) |
+
+### MCP Server (Claude Desktop)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_RECV_TIMEOUT` | `15.0` | Socket receive timeout in seconds |
+| `MCP_MODIFYING_CMD_TIMEOUT` | `15.0` | Timeout for state-modifying commands (create, delete, set) |
+| `MCP_READ_CMD_TIMEOUT` | `10.0` | Timeout for read-only commands (get) |
+| `MCP_HEALTH_CHECK_TIMEOUT` | `2.0` | Timeout for connection health checks |
+| `MCP_COMMAND_DELAY` | `0.05` | Delay before/after modifying commands (seconds) |
+| `MCP_RETRY_DELAY` | `1.0` | Delay between connection retry attempts |
+| `MCP_MAX_CONNECT_ATTEMPTS` | `3` | Maximum connection attempts before failing |
+| `ABLETON_HOST` | `localhost` | Hostname of the Ableton Remote Script |
+| `ABLETON_PORT` | `9877` | Port for socket communication |
 
 ### Ableton Connection
 
