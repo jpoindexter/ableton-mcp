@@ -160,6 +160,39 @@ ALLOWED_COMMANDS = {
     "move_device_left", "move_device_right",
     # Cue point jumping
     "jump_to_cue_point", "jump_to_prev_cue", "jump_to_next_cue",
+    # Detail view
+    "get_detail_clip", "set_detail_clip", "get_highlighted_clip_slot",
+    "select_device", "get_selected_device",
+    # Cue/preview volume
+    "get_cue_volume", "set_cue_volume",
+    # Send pre/post
+    "get_send_pre_post",
+    # Audio clip fades
+    "get_clip_fades", "set_clip_fade_in", "set_clip_fade_out",
+    # Clip time
+    "get_clip_start_time", "set_clip_start_time", "get_clip_end_time", "set_clip_end_time",
+    # Automation
+    "get_session_automation_record", "set_session_automation_record",
+    "get_arrangement_overdub", "set_arrangement_overdub", "re_enable_automation",
+    # Drum pad advanced
+    "get_drum_pad_info", "set_drum_pad_name",
+    # Simpler/Sampler
+    "get_simpler_sample_info", "get_simpler_parameters",
+    # Notes in range
+    "get_notes_in_range",
+    # Track capabilities
+    "get_track_capabilities", "get_track_available_input_types", "get_track_available_output_types",
+    "get_track_implicit_arm", "set_track_implicit_arm",
+    # Count in
+    "get_count_in_duration", "set_count_in_duration",
+    # Clip operations
+    "get_clip_playing_position", "get_clip_has_envelopes",
+    "quantize_clip", "deselect_all_notes", "duplicate_clip_loop",
+    "set_clip_notes", "move_clip_notes",
+    # Quick queries
+    "get_all_track_names",
+    # Scrub
+    "scrub_by",
 }
 
 # ============================================================================
