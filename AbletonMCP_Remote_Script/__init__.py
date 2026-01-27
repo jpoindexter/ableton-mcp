@@ -242,6 +242,38 @@ class AbletonMCP(ControlSurface):
             # View queries
             elif command_type == "get_current_view":
                 response["result"] = self._get_current_view()
+            # Arrangement queries
+            elif command_type == "get_arrangement_length":
+                response["result"] = self._get_arrangement_length()
+            elif command_type == "get_locators":
+                response["result"] = self._get_locators()
+            # Routing queries
+            elif command_type == "get_track_input_routing":
+                track_index = params.get("track_index", 0)
+                response["result"] = self._get_track_input_routing(track_index)
+            elif command_type == "get_track_output_routing":
+                track_index = params.get("track_index", 0)
+                response["result"] = self._get_track_output_routing(track_index)
+            elif command_type == "get_available_inputs":
+                track_index = params.get("track_index", 0)
+                response["result"] = self._get_available_inputs(track_index)
+            elif command_type == "get_available_outputs":
+                track_index = params.get("track_index", 0)
+                response["result"] = self._get_available_outputs(track_index)
+            # Performance/session queries
+            elif command_type == "get_cpu_load":
+                response["result"] = self._get_cpu_load()
+            elif command_type == "get_session_path":
+                response["result"] = self._get_session_path()
+            elif command_type == "is_session_modified":
+                response["result"] = self._is_session_modified()
+            elif command_type == "get_metronome_state":
+                response["result"] = self._get_metronome_state()
+            # Music theory queries (no modification needed)
+            elif command_type == "get_scale_notes":
+                root = params.get("root", 0)
+                scale_type = params.get("scale_type", "major")
+                response["result"] = self._get_scale_notes(root, scale_type)
             # Commands that modify Live's state should be scheduled on the main thread
             elif command_type in ["create_midi_track", "create_audio_track", "set_track_name",
                                  "set_track_mute", "set_track_solo", "set_track_arm",
@@ -258,7 +290,12 @@ class AbletonMCP(ControlSurface):
                                  "set_send_level", "set_return_volume", "set_return_pan",
                                  "focus_view", "select_track", "select_scene", "select_clip",
                                  "start_recording", "stop_recording", "toggle_session_record",
-                                 "toggle_arrangement_record", "set_overdub", "capture_midi"]:
+                                 "toggle_arrangement_record", "set_overdub", "capture_midi",
+                                 "set_arrangement_loop", "jump_to_time", "create_locator", "delete_locator",
+                                 "set_track_input_routing", "set_track_output_routing",
+                                 "set_metronome",
+                                 "quantize_clip_notes", "humanize_clip_timing", "humanize_clip_velocity",
+                                 "generate_drum_pattern", "generate_bassline"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -462,6 +499,66 @@ class AbletonMCP(ControlSurface):
                             result = self._set_overdub(enabled)
                         elif command_type == "capture_midi":
                             result = self._capture_midi()
+                        # Arrangement control
+                        elif command_type == "set_arrangement_loop":
+                            start = params.get("start", 0.0)
+                            end = params.get("end", 4.0)
+                            enabled = params.get("enabled", True)
+                            result = self._set_arrangement_loop(start, end, enabled)
+                        elif command_type == "jump_to_time":
+                            time = params.get("time", 0.0)
+                            result = self._jump_to_time(time)
+                        elif command_type == "create_locator":
+                            time = params.get("time", 0.0)
+                            name = params.get("name", "")
+                            result = self._create_locator(time, name)
+                        elif command_type == "delete_locator":
+                            locator_index = params.get("locator_index", 0)
+                            result = self._delete_locator(locator_index)
+                        # Routing control
+                        elif command_type == "set_track_input_routing":
+                            track_index = params.get("track_index", 0)
+                            routing_type = params.get("routing_type", "")
+                            routing_channel = params.get("routing_channel", "")
+                            result = self._set_track_input_routing(track_index, routing_type, routing_channel)
+                        elif command_type == "set_track_output_routing":
+                            track_index = params.get("track_index", 0)
+                            routing_type = params.get("routing_type", "")
+                            routing_channel = params.get("routing_channel", "")
+                            result = self._set_track_output_routing(track_index, routing_type, routing_channel)
+                        # Metronome control
+                        elif command_type == "set_metronome":
+                            enabled = params.get("enabled", True)
+                            result = self._set_metronome(enabled)
+                        # AI Music helpers (clip modifications)
+                        elif command_type == "quantize_clip_notes":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            grid = params.get("grid", 0.25)
+                            result = self._quantize_clip_notes(track_index, clip_index, grid)
+                        elif command_type == "humanize_clip_timing":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            amount = params.get("amount", 0.1)
+                            result = self._humanize_clip_timing(track_index, clip_index, amount)
+                        elif command_type == "humanize_clip_velocity":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            amount = params.get("amount", 0.1)
+                            result = self._humanize_clip_velocity(track_index, clip_index, amount)
+                        elif command_type == "generate_drum_pattern":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            style = params.get("style", "basic")
+                            length = params.get("length", 4.0)
+                            result = self._generate_drum_pattern(track_index, clip_index, style, length)
+                        elif command_type == "generate_bassline":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            root = params.get("root", 36)
+                            scale_type = params.get("scale_type", "minor")
+                            length = params.get("length", 4.0)
+                            result = self._generate_bassline(track_index, clip_index, root, scale_type, length)
 
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
@@ -1935,6 +2032,693 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error capturing MIDI: " + str(e))
+            raise
+
+    # ==================== ARRANGEMENT VIEW ====================
+
+    def _get_arrangement_length(self):
+        """Get the length of the arrangement"""
+        try:
+            result = {
+                "length": self._song.last_event_time if hasattr(self._song, 'last_event_time') else 0,
+                "loop_start": self._song.loop_start,
+                "loop_length": self._song.loop_length,
+                "loop_enabled": self._song.loop if hasattr(self._song, 'loop') else False
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting arrangement length: " + str(e))
+            raise
+
+    def _set_arrangement_loop(self, start, end, enabled):
+        """Set the arrangement loop region"""
+        try:
+            self._song.loop_start = start
+            self._song.loop_length = end - start
+            if hasattr(self._song, 'loop'):
+                self._song.loop = enabled
+
+            result = {
+                "loop_start": self._song.loop_start,
+                "loop_length": self._song.loop_length,
+                "loop_enabled": self._song.loop if hasattr(self._song, 'loop') else enabled
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error setting arrangement loop: " + str(e))
+            raise
+
+    def _jump_to_time(self, time):
+        """Jump to a specific time in the arrangement"""
+        try:
+            self._song.current_song_time = time
+
+            result = {
+                "current_time": self._song.current_song_time
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error jumping to time: " + str(e))
+            raise
+
+    def _get_locators(self):
+        """Get all locators/cue points"""
+        try:
+            locators = []
+            if hasattr(self._song, 'cue_points'):
+                for i, cue in enumerate(self._song.cue_points):
+                    locators.append({
+                        "index": i,
+                        "name": cue.name,
+                        "time": cue.time
+                    })
+
+            result = {
+                "locator_count": len(locators),
+                "locators": locators
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting locators: " + str(e))
+            raise
+
+    def _create_locator(self, time, name):
+        """Create a new locator/cue point"""
+        try:
+            if hasattr(self._song, 'set_or_delete_cue'):
+                self._song.set_or_delete_cue()
+                result = {
+                    "created": True,
+                    "time": time,
+                    "name": name
+                }
+            else:
+                result = {
+                    "created": False,
+                    "error": "Locator creation not available"
+                }
+            return result
+        except Exception as e:
+            self.log_message("Error creating locator: " + str(e))
+            raise
+
+    def _delete_locator(self, locator_index):
+        """Delete a locator"""
+        try:
+            if hasattr(self._song, 'cue_points') and locator_index < len(self._song.cue_points):
+                cue = self._song.cue_points[locator_index]
+                cue_name = cue.name
+                cue.time = -1  # Setting time to -1 deletes the cue point
+                result = {
+                    "deleted": True,
+                    "locator_index": locator_index,
+                    "name": cue_name
+                }
+            else:
+                result = {
+                    "deleted": False,
+                    "error": "Locator not found"
+                }
+            return result
+        except Exception as e:
+            self.log_message("Error deleting locator: " + str(e))
+            raise
+
+    # ==================== INPUT/OUTPUT ROUTING ====================
+
+    def _get_track_input_routing(self, track_index):
+        """Get the input routing of a track"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            result = {
+                "track_index": track_index,
+                "input_routing_type": str(track.input_routing_type.display_name) if hasattr(track.input_routing_type, 'display_name') else str(track.input_routing_type),
+                "input_routing_channel": str(track.input_routing_channel.display_name) if hasattr(track.input_routing_channel, 'display_name') else str(track.input_routing_channel)
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting track input routing: " + str(e))
+            raise
+
+    def _get_track_output_routing(self, track_index):
+        """Get the output routing of a track"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            result = {
+                "track_index": track_index,
+                "output_routing_type": str(track.output_routing_type.display_name) if hasattr(track.output_routing_type, 'display_name') else str(track.output_routing_type),
+                "output_routing_channel": str(track.output_routing_channel.display_name) if hasattr(track.output_routing_channel, 'display_name') else str(track.output_routing_channel)
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting track output routing: " + str(e))
+            raise
+
+    def _get_available_inputs(self, track_index):
+        """Get available input routing options for a track"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+            inputs = []
+
+            if hasattr(track, 'available_input_routing_types'):
+                for rt in track.available_input_routing_types:
+                    inputs.append(str(rt.display_name) if hasattr(rt, 'display_name') else str(rt))
+
+            result = {
+                "track_index": track_index,
+                "available_inputs": inputs
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting available inputs: " + str(e))
+            raise
+
+    def _get_available_outputs(self, track_index):
+        """Get available output routing options for a track"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+            outputs = []
+
+            if hasattr(track, 'available_output_routing_types'):
+                for rt in track.available_output_routing_types:
+                    outputs.append(str(rt.display_name) if hasattr(rt, 'display_name') else str(rt))
+
+            result = {
+                "track_index": track_index,
+                "available_outputs": outputs
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting available outputs: " + str(e))
+            raise
+
+    def _set_track_input_routing(self, track_index, routing_type, routing_channel):
+        """Set the input routing of a track"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            # Find and set the routing type
+            if hasattr(track, 'available_input_routing_types'):
+                for rt in track.available_input_routing_types:
+                    rt_name = str(rt.display_name) if hasattr(rt, 'display_name') else str(rt)
+                    if rt_name.lower() == routing_type.lower():
+                        track.input_routing_type = rt
+                        break
+
+            result = {
+                "track_index": track_index,
+                "input_routing_type": str(track.input_routing_type.display_name) if hasattr(track.input_routing_type, 'display_name') else str(track.input_routing_type)
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error setting track input routing: " + str(e))
+            raise
+
+    def _set_track_output_routing(self, track_index, routing_type, routing_channel):
+        """Set the output routing of a track"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            # Find and set the routing type
+            if hasattr(track, 'available_output_routing_types'):
+                for rt in track.available_output_routing_types:
+                    rt_name = str(rt.display_name) if hasattr(rt, 'display_name') else str(rt)
+                    if rt_name.lower() == routing_type.lower():
+                        track.output_routing_type = rt
+                        break
+
+            result = {
+                "track_index": track_index,
+                "output_routing_type": str(track.output_routing_type.display_name) if hasattr(track.output_routing_type, 'display_name') else str(track.output_routing_type)
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error setting track output routing: " + str(e))
+            raise
+
+    # ==================== PERFORMANCE & SESSION ====================
+
+    def _get_cpu_load(self):
+        """Get the current CPU load"""
+        try:
+            app = self.application()
+            result = {
+                "cpu_load": app.get_cpu_load() if hasattr(app, 'get_cpu_load') else None
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting CPU load: " + str(e))
+            raise
+
+    def _get_session_path(self):
+        """Get the path of the current session"""
+        try:
+            app = self.application()
+            doc = app.get_document() if hasattr(app, 'get_document') else None
+
+            result = {
+                "path": doc.file_path if doc and hasattr(doc, 'file_path') else None,
+                "name": self._song.name if hasattr(self._song, 'name') else None
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting session path: " + str(e))
+            raise
+
+    def _is_session_modified(self):
+        """Check if the session has unsaved changes"""
+        try:
+            app = self.application()
+            doc = app.get_document() if hasattr(app, 'get_document') else None
+
+            result = {
+                "modified": doc.is_modified if doc and hasattr(doc, 'is_modified') else None
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error checking session modified: " + str(e))
+            raise
+
+    def _get_metronome_state(self):
+        """Get the metronome state"""
+        try:
+            result = {
+                "enabled": self._song.metronome if hasattr(self._song, 'metronome') else None
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting metronome state: " + str(e))
+            raise
+
+    def _set_metronome(self, enabled):
+        """Set the metronome on/off"""
+        try:
+            if hasattr(self._song, 'metronome'):
+                self._song.metronome = enabled
+
+            result = {
+                "enabled": self._song.metronome if hasattr(self._song, 'metronome') else enabled
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error setting metronome: " + str(e))
+            raise
+
+    # ==================== AI MUSIC HELPERS ====================
+
+    def _get_scale_notes(self, root, scale_type):
+        """Get notes in a scale"""
+        try:
+            # Scale intervals (semitones from root)
+            scales = {
+                "major": [0, 2, 4, 5, 7, 9, 11],
+                "minor": [0, 2, 3, 5, 7, 8, 10],
+                "dorian": [0, 2, 3, 5, 7, 9, 10],
+                "phrygian": [0, 1, 3, 5, 7, 8, 10],
+                "lydian": [0, 2, 4, 6, 7, 9, 11],
+                "mixolydian": [0, 2, 4, 5, 7, 9, 10],
+                "locrian": [0, 1, 3, 5, 6, 8, 10],
+                "harmonic_minor": [0, 2, 3, 5, 7, 8, 11],
+                "melodic_minor": [0, 2, 3, 5, 7, 9, 11],
+                "pentatonic_major": [0, 2, 4, 7, 9],
+                "pentatonic_minor": [0, 3, 5, 7, 10],
+                "blues": [0, 3, 5, 6, 7, 10],
+                "chromatic": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+            }
+
+            scale = scales.get(scale_type.lower(), scales["major"])
+            notes = [(root + interval) % 12 for interval in scale]
+            midi_notes = [root + interval for interval in scale]
+
+            note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+            result = {
+                "root": root,
+                "root_name": note_names[root % 12],
+                "scale_type": scale_type,
+                "intervals": scale,
+                "notes": notes,
+                "note_names": [note_names[n] for n in notes],
+                "midi_notes_octave": midi_notes
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting scale notes: " + str(e))
+            raise
+
+    def _quantize_clip_notes(self, track_index, clip_index, grid):
+        """Quantize notes in a clip to a grid"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+
+            clip_slot = track.clip_slots[clip_index]
+
+            if not clip_slot.has_clip:
+                raise Exception("No clip in slot")
+
+            clip = clip_slot.clip
+
+            if not clip.is_midi_clip:
+                raise Exception("Clip is not a MIDI clip")
+
+            # Get notes
+            clip.select_all_notes()
+            notes_data = clip.get_selected_notes()
+            clip.deselect_all_notes()
+
+            # Quantize notes
+            quantized_notes = []
+            for note in notes_data:
+                pitch, start, duration, velocity, mute = note
+                quantized_start = round(start / grid) * grid
+                quantized_notes.append((pitch, quantized_start, duration, velocity, mute))
+
+            # Set quantized notes
+            clip.remove_notes(0, 0, clip.length, 128)
+            clip.set_notes(tuple(quantized_notes))
+
+            result = {
+                "quantized": True,
+                "note_count": len(quantized_notes),
+                "grid": grid
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error quantizing clip notes: " + str(e))
+            raise
+
+    def _humanize_clip_timing(self, track_index, clip_index, amount):
+        """Add random timing variation to notes"""
+        try:
+            import random
+
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+
+            clip_slot = track.clip_slots[clip_index]
+
+            if not clip_slot.has_clip:
+                raise Exception("No clip in slot")
+
+            clip = clip_slot.clip
+
+            if not clip.is_midi_clip:
+                raise Exception("Clip is not a MIDI clip")
+
+            # Get notes
+            clip.select_all_notes()
+            notes_data = clip.get_selected_notes()
+            clip.deselect_all_notes()
+
+            # Humanize timing
+            humanized_notes = []
+            for note in notes_data:
+                pitch, start, duration, velocity, mute = note
+                # Add random offset (amount is in beats, e.g., 0.1 = 10% of a beat)
+                offset = (random.random() - 0.5) * 2 * amount
+                new_start = max(0, start + offset)
+                humanized_notes.append((pitch, new_start, duration, velocity, mute))
+
+            # Set humanized notes
+            clip.remove_notes(0, 0, clip.length, 128)
+            clip.set_notes(tuple(humanized_notes))
+
+            result = {
+                "humanized": True,
+                "note_count": len(humanized_notes),
+                "amount": amount
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error humanizing clip timing: " + str(e))
+            raise
+
+    def _humanize_clip_velocity(self, track_index, clip_index, amount):
+        """Add random velocity variation to notes"""
+        try:
+            import random
+
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+
+            clip_slot = track.clip_slots[clip_index]
+
+            if not clip_slot.has_clip:
+                raise Exception("No clip in slot")
+
+            clip = clip_slot.clip
+
+            if not clip.is_midi_clip:
+                raise Exception("Clip is not a MIDI clip")
+
+            # Get notes
+            clip.select_all_notes()
+            notes_data = clip.get_selected_notes()
+            clip.deselect_all_notes()
+
+            # Humanize velocity
+            humanized_notes = []
+            for note in notes_data:
+                pitch, start, duration, velocity, mute = note
+                # Add random velocity variation (amount is 0-1, e.g., 0.1 = +/-10% variation)
+                variation = int((random.random() - 0.5) * 2 * amount * 127)
+                new_velocity = max(1, min(127, velocity + variation))
+                humanized_notes.append((pitch, start, duration, new_velocity, mute))
+
+            # Set humanized notes
+            clip.remove_notes(0, 0, clip.length, 128)
+            clip.set_notes(tuple(humanized_notes))
+
+            result = {
+                "humanized": True,
+                "note_count": len(humanized_notes),
+                "amount": amount
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error humanizing clip velocity: " + str(e))
+            raise
+
+    def _generate_drum_pattern(self, track_index, clip_index, style, length):
+        """Generate a drum pattern"""
+        try:
+            import random
+
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+
+            clip_slot = track.clip_slots[clip_index]
+
+            # Create clip if it doesn't exist
+            if not clip_slot.has_clip:
+                clip_slot.create_clip(length)
+
+            clip = clip_slot.clip
+
+            # Clear existing notes
+            clip.remove_notes(0, 0, clip.length, 128)
+
+            # Drum mappings (General MIDI)
+            KICK = 36
+            SNARE = 38
+            CLOSED_HH = 42
+            OPEN_HH = 46
+            CLAP = 39
+
+            notes = []
+            beats = int(length)
+
+            if style == "basic":
+                # Basic 4/4 pattern
+                for beat in range(beats):
+                    # Kick on 1 and 3
+                    if beat % 2 == 0:
+                        notes.append((KICK, float(beat), 0.25, 100, False))
+                    # Snare on 2 and 4
+                    if beat % 2 == 1:
+                        notes.append((SNARE, float(beat), 0.25, 100, False))
+                    # Hi-hat on every 8th
+                    for eighth in range(2):
+                        notes.append((CLOSED_HH, beat + eighth * 0.5, 0.25, 80, False))
+
+            elif style == "house":
+                # House pattern - 4 on the floor
+                for beat in range(beats):
+                    notes.append((KICK, float(beat), 0.25, 110, False))
+                    if beat % 2 == 1:
+                        notes.append((CLAP, float(beat), 0.25, 100, False))
+                    # Offbeat hi-hats
+                    notes.append((OPEN_HH, beat + 0.5, 0.25, 90, False))
+
+            elif style == "hiphop":
+                # Hip-hop pattern
+                for beat in range(beats):
+                    # Kick pattern
+                    if beat % 4 == 0:
+                        notes.append((KICK, float(beat), 0.25, 110, False))
+                    if beat % 4 == 2:
+                        notes.append((KICK, beat + 0.75, 0.25, 90, False))
+                    # Snare on 2 and 4
+                    if beat % 2 == 1:
+                        notes.append((SNARE, float(beat), 0.25, 100, False))
+                    # Hi-hats
+                    for eighth in range(2):
+                        vel = 80 if eighth == 0 else 60
+                        notes.append((CLOSED_HH, beat + eighth * 0.5, 0.25, vel, False))
+
+            elif style == "dnb":
+                # Drum and bass pattern
+                for beat in range(beats):
+                    # Two-step kick pattern
+                    if beat % 4 == 0:
+                        notes.append((KICK, float(beat), 0.25, 110, False))
+                    if beat % 4 == 2:
+                        notes.append((KICK, beat + 0.5, 0.25, 100, False))
+                    # Snare on 2 and 4
+                    if beat % 2 == 1:
+                        notes.append((SNARE, float(beat), 0.25, 110, False))
+                    # Fast hi-hats
+                    for sixteenth in range(4):
+                        vel = 70 + random.randint(-10, 10)
+                        notes.append((CLOSED_HH, beat + sixteenth * 0.25, 0.125, vel, False))
+
+            else:  # Random/experimental
+                for beat in range(beats):
+                    if random.random() > 0.3:
+                        notes.append((KICK, beat + random.choice([0, 0.5]), 0.25, random.randint(80, 110), False))
+                    if random.random() > 0.5:
+                        notes.append((SNARE, beat + random.choice([0, 0.25, 0.5]), 0.25, random.randint(80, 100), False))
+                    if random.random() > 0.2:
+                        notes.append((CLOSED_HH, beat + random.random() * 0.5, 0.25, random.randint(60, 90), False))
+
+            # Set the notes
+            clip.set_notes(tuple(notes))
+
+            result = {
+                "generated": True,
+                "style": style,
+                "length": length,
+                "note_count": len(notes)
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error generating drum pattern: " + str(e))
+            raise
+
+    def _generate_bassline(self, track_index, clip_index, root, scale_type, length):
+        """Generate a bassline pattern"""
+        try:
+            import random
+
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+
+            clip_slot = track.clip_slots[clip_index]
+
+            # Create clip if it doesn't exist
+            if not clip_slot.has_clip:
+                clip_slot.create_clip(length)
+
+            clip = clip_slot.clip
+
+            # Clear existing notes
+            clip.remove_notes(0, 0, clip.length, 128)
+
+            # Get scale notes
+            scales = {
+                "major": [0, 2, 4, 5, 7, 9, 11],
+                "minor": [0, 2, 3, 5, 7, 8, 10],
+                "dorian": [0, 2, 3, 5, 7, 9, 10],
+                "phrygian": [0, 1, 3, 5, 7, 8, 10],
+                "pentatonic_minor": [0, 3, 5, 7, 10],
+                "blues": [0, 3, 5, 6, 7, 10]
+            }
+            scale = scales.get(scale_type.lower(), scales["minor"])
+
+            notes = []
+            beats = int(length)
+            current_note = root
+
+            for beat in range(beats):
+                # Root note on beat 1
+                if beat % 4 == 0:
+                    notes.append((root, float(beat), 0.5, 100, False))
+                else:
+                    # Choose from scale
+                    interval = random.choice(scale)
+                    note = root + interval
+                    # Vary octave occasionally
+                    if random.random() > 0.7:
+                        note += 12
+                    duration = random.choice([0.25, 0.5, 0.75])
+                    velocity = random.randint(80, 110)
+                    notes.append((note, float(beat), duration, velocity, False))
+
+                # Add some 8th note movement
+                if random.random() > 0.5:
+                    interval = random.choice(scale)
+                    note = root + interval
+                    notes.append((note, beat + 0.5, 0.25, random.randint(70, 90), False))
+
+            # Set the notes
+            clip.set_notes(tuple(notes))
+
+            result = {
+                "generated": True,
+                "root": root,
+                "scale_type": scale_type,
+                "length": length,
+                "note_count": len(notes)
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error generating bassline: " + str(e))
             raise
 
     def _get_browser_item(self, uri, path):

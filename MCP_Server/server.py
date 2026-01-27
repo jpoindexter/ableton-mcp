@@ -118,7 +118,12 @@ class AbletonConnection:
             "set_send_level", "set_return_volume", "set_return_pan",
             "focus_view", "select_track", "select_scene", "select_clip",
             "start_recording", "stop_recording", "toggle_session_record",
-            "toggle_arrangement_record", "set_overdub", "capture_midi"
+            "toggle_arrangement_record", "set_overdub", "capture_midi",
+            # Tier 3 & 4 commands
+            "set_arrangement_loop", "jump_to_time", "create_locator", "delete_locator",
+            "set_track_input_routing", "set_track_output_routing", "set_metronome",
+            "quantize_clip_notes", "humanize_clip_timing", "humanize_clip_velocity",
+            "generate_drum_pattern", "generate_bassline"
         ]
         
         try:
@@ -1347,6 +1352,429 @@ def capture_midi(ctx: Context) -> str:
     except Exception as e:
         logger.error(f"Error capturing MIDI: {str(e)}")
         return f"Error capturing MIDI: {str(e)}"
+
+# ==================== ARRANGEMENT VIEW ====================
+
+@mcp.tool()
+def get_arrangement_length(ctx: Context) -> str:
+    """Get the length and loop settings of the arrangement."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_arrangement_length")
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting arrangement length: {str(e)}")
+        return f"Error getting arrangement length: {str(e)}"
+
+@mcp.tool()
+def set_arrangement_loop(ctx: Context, start: float, end: float, enabled: bool = True) -> str:
+    """
+    Set the arrangement loop region.
+
+    Parameters:
+    - start: Loop start position in beats
+    - end: Loop end position in beats
+    - enabled: Whether to enable looping
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_arrangement_loop", {
+            "start": start,
+            "end": end,
+            "enabled": enabled
+        })
+        return f"Set loop from {result.get('loop_start')} to {result.get('loop_start') + result.get('loop_length')}"
+    except Exception as e:
+        logger.error(f"Error setting arrangement loop: {str(e)}")
+        return f"Error setting arrangement loop: {str(e)}"
+
+@mcp.tool()
+def jump_to_time(ctx: Context, time: float) -> str:
+    """
+    Jump to a specific time in the arrangement.
+
+    Parameters:
+    - time: Position in beats to jump to
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("jump_to_time", {"time": time})
+        return f"Jumped to position {result.get('current_time')}"
+    except Exception as e:
+        logger.error(f"Error jumping to time: {str(e)}")
+        return f"Error jumping to time: {str(e)}"
+
+@mcp.tool()
+def get_locators(ctx: Context) -> str:
+    """Get all locators/cue points in the arrangement."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_locators")
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting locators: {str(e)}")
+        return f"Error getting locators: {str(e)}"
+
+@mcp.tool()
+def create_locator(ctx: Context, time: float, name: str = "") -> str:
+    """
+    Create a new locator/cue point.
+
+    Parameters:
+    - time: Position in beats for the locator
+    - name: Name for the locator
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("create_locator", {"time": time, "name": name})
+        if result.get("created"):
+            return f"Created locator '{name}' at {time}"
+        else:
+            return result.get("error", "Failed to create locator")
+    except Exception as e:
+        logger.error(f"Error creating locator: {str(e)}")
+        return f"Error creating locator: {str(e)}"
+
+@mcp.tool()
+def delete_locator(ctx: Context, locator_index: int) -> str:
+    """
+    Delete a locator.
+
+    Parameters:
+    - locator_index: Index of the locator to delete
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("delete_locator", {"locator_index": locator_index})
+        if result.get("deleted"):
+            return f"Deleted locator '{result.get('name')}'"
+        else:
+            return result.get("error", "Failed to delete locator")
+    except Exception as e:
+        logger.error(f"Error deleting locator: {str(e)}")
+        return f"Error deleting locator: {str(e)}"
+
+# ==================== INPUT/OUTPUT ROUTING ====================
+
+@mcp.tool()
+def get_track_input_routing(ctx: Context, track_index: int) -> str:
+    """
+    Get the input routing of a track.
+
+    Parameters:
+    - track_index: The index of the track
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_track_input_routing", {"track_index": track_index})
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting track input routing: {str(e)}")
+        return f"Error getting track input routing: {str(e)}"
+
+@mcp.tool()
+def get_track_output_routing(ctx: Context, track_index: int) -> str:
+    """
+    Get the output routing of a track.
+
+    Parameters:
+    - track_index: The index of the track
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_track_output_routing", {"track_index": track_index})
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting track output routing: {str(e)}")
+        return f"Error getting track output routing: {str(e)}"
+
+@mcp.tool()
+def get_available_inputs(ctx: Context, track_index: int) -> str:
+    """
+    Get available input routing options for a track.
+
+    Parameters:
+    - track_index: The index of the track
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_available_inputs", {"track_index": track_index})
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting available inputs: {str(e)}")
+        return f"Error getting available inputs: {str(e)}"
+
+@mcp.tool()
+def get_available_outputs(ctx: Context, track_index: int) -> str:
+    """
+    Get available output routing options for a track.
+
+    Parameters:
+    - track_index: The index of the track
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_available_outputs", {"track_index": track_index})
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting available outputs: {str(e)}")
+        return f"Error getting available outputs: {str(e)}"
+
+@mcp.tool()
+def set_track_input_routing(ctx: Context, track_index: int, routing_type: str, routing_channel: str = "") -> str:
+    """
+    Set the input routing of a track.
+
+    Parameters:
+    - track_index: The index of the track
+    - routing_type: The input routing type (use get_available_inputs to see options)
+    - routing_channel: The input channel (optional)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_track_input_routing", {
+            "track_index": track_index,
+            "routing_type": routing_type,
+            "routing_channel": routing_channel
+        })
+        return f"Set track {track_index} input to {result.get('input_routing_type')}"
+    except Exception as e:
+        logger.error(f"Error setting track input routing: {str(e)}")
+        return f"Error setting track input routing: {str(e)}"
+
+@mcp.tool()
+def set_track_output_routing(ctx: Context, track_index: int, routing_type: str, routing_channel: str = "") -> str:
+    """
+    Set the output routing of a track.
+
+    Parameters:
+    - track_index: The index of the track
+    - routing_type: The output routing type (use get_available_outputs to see options)
+    - routing_channel: The output channel (optional)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_track_output_routing", {
+            "track_index": track_index,
+            "routing_type": routing_type,
+            "routing_channel": routing_channel
+        })
+        return f"Set track {track_index} output to {result.get('output_routing_type')}"
+    except Exception as e:
+        logger.error(f"Error setting track output routing: {str(e)}")
+        return f"Error setting track output routing: {str(e)}"
+
+# ==================== PERFORMANCE & SESSION ====================
+
+@mcp.tool()
+def get_cpu_load(ctx: Context) -> str:
+    """Get the current CPU load of Ableton."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_cpu_load")
+        if result.get("cpu_load") is not None:
+            return f"CPU Load: {result.get('cpu_load')}%"
+        else:
+            return "CPU load information not available"
+    except Exception as e:
+        logger.error(f"Error getting CPU load: {str(e)}")
+        return f"Error getting CPU load: {str(e)}"
+
+@mcp.tool()
+def get_session_path(ctx: Context) -> str:
+    """Get the file path of the current session."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_session_path")
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting session path: {str(e)}")
+        return f"Error getting session path: {str(e)}"
+
+@mcp.tool()
+def is_session_modified(ctx: Context) -> str:
+    """Check if the session has unsaved changes."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("is_session_modified")
+        if result.get("modified") is not None:
+            status = "has unsaved changes" if result.get("modified") else "is saved"
+            return f"Session {status}"
+        else:
+            return "Session modification status not available"
+    except Exception as e:
+        logger.error(f"Error checking session modified: {str(e)}")
+        return f"Error checking session modified: {str(e)}"
+
+@mcp.tool()
+def get_metronome_state(ctx: Context) -> str:
+    """Get the current metronome state."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_metronome_state")
+        if result.get("enabled") is not None:
+            state = "on" if result.get("enabled") else "off"
+            return f"Metronome is {state}"
+        else:
+            return "Metronome state not available"
+    except Exception as e:
+        logger.error(f"Error getting metronome state: {str(e)}")
+        return f"Error getting metronome state: {str(e)}"
+
+@mcp.tool()
+def set_metronome(ctx: Context, enabled: bool) -> str:
+    """
+    Turn the metronome on or off.
+
+    Parameters:
+    - enabled: True to enable, False to disable
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_metronome", {"enabled": enabled})
+        state = "on" if result.get("enabled") else "off"
+        return f"Metronome is now {state}"
+    except Exception as e:
+        logger.error(f"Error setting metronome: {str(e)}")
+        return f"Error setting metronome: {str(e)}"
+
+# ==================== AI MUSIC HELPERS ====================
+
+@mcp.tool()
+def get_scale_notes(ctx: Context, root: int, scale_type: str = "major") -> str:
+    """
+    Get the notes in a musical scale.
+
+    Parameters:
+    - root: MIDI note number for the root (0-127, where 60 = middle C)
+    - scale_type: Type of scale (major, minor, dorian, phrygian, lydian, mixolydian, locrian, harmonic_minor, melodic_minor, pentatonic_major, pentatonic_minor, blues, chromatic)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_scale_notes", {
+            "root": root,
+            "scale_type": scale_type
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting scale notes: {str(e)}")
+        return f"Error getting scale notes: {str(e)}"
+
+@mcp.tool()
+def quantize_clip_notes(ctx: Context, track_index: int, clip_index: int, grid: float = 0.25) -> str:
+    """
+    Quantize notes in a clip to a grid.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot containing the clip
+    - grid: Grid size in beats (0.25 = 16th notes, 0.5 = 8th notes, 1.0 = quarter notes)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("quantize_clip_notes", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "grid": grid
+        })
+        return f"Quantized {result.get('note_count')} notes to {grid} beat grid"
+    except Exception as e:
+        logger.error(f"Error quantizing clip notes: {str(e)}")
+        return f"Error quantizing clip notes: {str(e)}"
+
+@mcp.tool()
+def humanize_clip_timing(ctx: Context, track_index: int, clip_index: int, amount: float = 0.05) -> str:
+    """
+    Add random timing variation to notes in a clip for a more human feel.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot containing the clip
+    - amount: Amount of timing variation in beats (0.05 = subtle, 0.1 = moderate, 0.2 = heavy)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("humanize_clip_timing", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "amount": amount
+        })
+        return f"Humanized timing of {result.get('note_count')} notes with amount {amount}"
+    except Exception as e:
+        logger.error(f"Error humanizing clip timing: {str(e)}")
+        return f"Error humanizing clip timing: {str(e)}"
+
+@mcp.tool()
+def humanize_clip_velocity(ctx: Context, track_index: int, clip_index: int, amount: float = 0.1) -> str:
+    """
+    Add random velocity variation to notes in a clip for a more human feel.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot containing the clip
+    - amount: Amount of velocity variation (0.1 = +/-10%, 0.2 = +/-20%)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("humanize_clip_velocity", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "amount": amount
+        })
+        return f"Humanized velocity of {result.get('note_count')} notes with amount {amount}"
+    except Exception as e:
+        logger.error(f"Error humanizing clip velocity: {str(e)}")
+        return f"Error humanizing clip velocity: {str(e)}"
+
+@mcp.tool()
+def generate_drum_pattern(ctx: Context, track_index: int, clip_index: int, style: str = "basic", length: float = 4.0) -> str:
+    """
+    Generate a drum pattern and add it to a clip.
+
+    Parameters:
+    - track_index: The index of the track (should be a drum track)
+    - clip_index: The index of the clip slot
+    - style: Pattern style (basic, house, hiphop, dnb, random)
+    - length: Pattern length in beats
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("generate_drum_pattern", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "style": style,
+            "length": length
+        })
+        return f"Generated {style} drum pattern with {result.get('note_count')} notes"
+    except Exception as e:
+        logger.error(f"Error generating drum pattern: {str(e)}")
+        return f"Error generating drum pattern: {str(e)}"
+
+@mcp.tool()
+def generate_bassline(ctx: Context, track_index: int, clip_index: int, root: int = 36, scale_type: str = "minor", length: float = 4.0) -> str:
+    """
+    Generate a bassline pattern and add it to a clip.
+
+    Parameters:
+    - track_index: The index of the track (should be a bass track)
+    - clip_index: The index of the clip slot
+    - root: Root note MIDI number (36 = C1, common bass range)
+    - scale_type: Scale to use (minor, major, dorian, pentatonic_minor, blues)
+    - length: Pattern length in beats
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("generate_bassline", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "root": root,
+            "scale_type": scale_type,
+            "length": length
+        })
+        return f"Generated {scale_type} bassline with {result.get('note_count')} notes"
+    except Exception as e:
+        logger.error(f"Error generating bassline: {str(e)}")
+        return f"Error generating bassline: {str(e)}"
 
 @mcp.tool()
 def get_browser_tree(ctx: Context, category_type: str = "all") -> str:
