@@ -104,10 +104,17 @@ class AbletonConnection:
         is_modifying_command = command_type in [
             "create_midi_track", "create_audio_track", "set_track_name",
             "set_track_mute", "set_track_solo", "set_track_arm",
+            "delete_track", "duplicate_track", "set_track_color",
             "create_clip", "delete_clip", "add_notes_to_clip", "set_clip_name",
+            "duplicate_clip", "set_clip_color", "set_clip_loop",
+            "remove_notes", "remove_all_notes", "transpose_notes",
             "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
+            "toggle_device", "delete_device",
             "start_playback", "stop_playback", "load_instrument_or_effect",
-            "load_browser_item"
+            "load_browser_item",
+            "create_scene", "delete_scene", "fire_scene", "stop_scene",
+            "set_scene_name", "set_scene_color", "duplicate_scene",
+            "undo", "redo"
         ]
         
         try:
@@ -686,6 +693,400 @@ def set_device_parameter(ctx: Context, track_index: int, device_index: int, para
     except Exception as e:
         logger.error(f"Error setting device parameter: {str(e)}")
         return f"Error setting device parameter: {str(e)}"
+
+# ==================== SCENE MANAGEMENT ====================
+
+@mcp.tool()
+def get_all_scenes(ctx: Context) -> str:
+    """Get information about all scenes in the session."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_all_scenes")
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting scenes: {str(e)}")
+        return f"Error getting scenes: {str(e)}"
+
+@mcp.tool()
+def create_scene(ctx: Context, index: int = -1) -> str:
+    """
+    Create a new scene.
+
+    Parameters:
+    - index: The index to insert the scene at (-1 = end of list)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("create_scene", {"index": index})
+        return f"Created new scene '{result.get('name')}' at index {result.get('index')}"
+    except Exception as e:
+        logger.error(f"Error creating scene: {str(e)}")
+        return f"Error creating scene: {str(e)}"
+
+@mcp.tool()
+def delete_scene(ctx: Context, scene_index: int) -> str:
+    """
+    Delete a scene.
+
+    Parameters:
+    - scene_index: The index of the scene to delete
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("delete_scene", {"scene_index": scene_index})
+        return f"Deleted scene '{result.get('scene_name')}' at index {scene_index}"
+    except Exception as e:
+        logger.error(f"Error deleting scene: {str(e)}")
+        return f"Error deleting scene: {str(e)}"
+
+@mcp.tool()
+def fire_scene(ctx: Context, scene_index: int) -> str:
+    """
+    Fire (trigger) a scene to play all clips in that row.
+
+    Parameters:
+    - scene_index: The index of the scene to fire
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("fire_scene", {"scene_index": scene_index})
+        return f"Fired scene '{result.get('scene_name')}' at index {scene_index}"
+    except Exception as e:
+        logger.error(f"Error firing scene: {str(e)}")
+        return f"Error firing scene: {str(e)}"
+
+@mcp.tool()
+def stop_scene(ctx: Context, scene_index: int) -> str:
+    """
+    Stop all clips in a scene.
+
+    Parameters:
+    - scene_index: The index of the scene to stop
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("stop_scene", {"scene_index": scene_index})
+        return f"Stopped scene at index {scene_index}"
+    except Exception as e:
+        logger.error(f"Error stopping scene: {str(e)}")
+        return f"Error stopping scene: {str(e)}"
+
+@mcp.tool()
+def set_scene_name(ctx: Context, scene_index: int, name: str) -> str:
+    """
+    Set the name of a scene.
+
+    Parameters:
+    - scene_index: The index of the scene to rename
+    - name: The new name for the scene
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_scene_name", {"scene_index": scene_index, "name": name})
+        return f"Renamed scene {scene_index} to '{result.get('name')}'"
+    except Exception as e:
+        logger.error(f"Error setting scene name: {str(e)}")
+        return f"Error setting scene name: {str(e)}"
+
+@mcp.tool()
+def set_scene_color(ctx: Context, scene_index: int, color: int) -> str:
+    """
+    Set the color of a scene.
+
+    Parameters:
+    - scene_index: The index of the scene
+    - color: The color index (0-69 in Ableton's color palette)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_scene_color", {"scene_index": scene_index, "color": color})
+        return f"Set scene {scene_index} color to {result.get('color_index')}"
+    except Exception as e:
+        logger.error(f"Error setting scene color: {str(e)}")
+        return f"Error setting scene color: {str(e)}"
+
+@mcp.tool()
+def duplicate_scene(ctx: Context, scene_index: int) -> str:
+    """
+    Duplicate a scene.
+
+    Parameters:
+    - scene_index: The index of the scene to duplicate
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("duplicate_scene", {"scene_index": scene_index})
+        return f"Duplicated scene {scene_index}, new scene at index {result.get('new_index')}"
+    except Exception as e:
+        logger.error(f"Error duplicating scene: {str(e)}")
+        return f"Error duplicating scene: {str(e)}"
+
+# ==================== TRACK MANAGEMENT ====================
+
+@mcp.tool()
+def delete_track(ctx: Context, track_index: int) -> str:
+    """
+    Delete a track.
+
+    Parameters:
+    - track_index: The index of the track to delete
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("delete_track", {"track_index": track_index})
+        return f"Deleted track '{result.get('track_name')}' at index {track_index}"
+    except Exception as e:
+        logger.error(f"Error deleting track: {str(e)}")
+        return f"Error deleting track: {str(e)}"
+
+@mcp.tool()
+def duplicate_track(ctx: Context, track_index: int) -> str:
+    """
+    Duplicate a track with all its clips and devices.
+
+    Parameters:
+    - track_index: The index of the track to duplicate
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("duplicate_track", {"track_index": track_index})
+        return f"Duplicated track {track_index}, new track '{result.get('new_name')}' at index {result.get('new_index')}"
+    except Exception as e:
+        logger.error(f"Error duplicating track: {str(e)}")
+        return f"Error duplicating track: {str(e)}"
+
+@mcp.tool()
+def set_track_color(ctx: Context, track_index: int, color: int) -> str:
+    """
+    Set the color of a track.
+
+    Parameters:
+    - track_index: The index of the track
+    - color: The color index (0-69 in Ableton's color palette)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_track_color", {"track_index": track_index, "color": color})
+        return f"Set track {track_index} color to {result.get('color_index')}"
+    except Exception as e:
+        logger.error(f"Error setting track color: {str(e)}")
+        return f"Error setting track color: {str(e)}"
+
+# ==================== DEVICE MANAGEMENT ====================
+
+@mcp.tool()
+def toggle_device(ctx: Context, track_index: int, device_index: int) -> str:
+    """
+    Toggle a device on or off.
+
+    Parameters:
+    - track_index: The index of the track containing the device
+    - device_index: The index of the device on the track
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("toggle_device", {
+            "track_index": track_index,
+            "device_index": device_index
+        })
+        state = "on" if result.get("is_active") else "off"
+        return f"Toggled device '{result.get('device_name')}' {state}"
+    except Exception as e:
+        logger.error(f"Error toggling device: {str(e)}")
+        return f"Error toggling device: {str(e)}"
+
+@mcp.tool()
+def delete_device(ctx: Context, track_index: int, device_index: int) -> str:
+    """
+    Delete a device from a track.
+
+    Parameters:
+    - track_index: The index of the track containing the device
+    - device_index: The index of the device to delete
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("delete_device", {
+            "track_index": track_index,
+            "device_index": device_index
+        })
+        return f"Deleted device '{result.get('device_name')}' from track {track_index}"
+    except Exception as e:
+        logger.error(f"Error deleting device: {str(e)}")
+        return f"Error deleting device: {str(e)}"
+
+# ==================== CLIP MANAGEMENT ====================
+
+@mcp.tool()
+def duplicate_clip(ctx: Context, track_index: int, clip_index: int) -> str:
+    """
+    Duplicate a clip to the next empty slot.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot containing the clip
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("duplicate_clip", {
+            "track_index": track_index,
+            "clip_index": clip_index
+        })
+        return f"Duplicated clip to slot {result.get('new_index')}"
+    except Exception as e:
+        logger.error(f"Error duplicating clip: {str(e)}")
+        return f"Error duplicating clip: {str(e)}"
+
+@mcp.tool()
+def set_clip_color(ctx: Context, track_index: int, clip_index: int, color: int) -> str:
+    """
+    Set the color of a clip.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot containing the clip
+    - color: The color index (0-69 in Ableton's color palette)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_clip_color", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "color": color
+        })
+        return f"Set clip color to {result.get('color_index')}"
+    except Exception as e:
+        logger.error(f"Error setting clip color: {str(e)}")
+        return f"Error setting clip color: {str(e)}"
+
+@mcp.tool()
+def set_clip_loop(ctx: Context, track_index: int, clip_index: int, loop_start: float = 0.0, loop_end: float = 4.0, looping: bool = True) -> str:
+    """
+    Set the loop settings of a clip.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot containing the clip
+    - loop_start: The start point of the loop in beats
+    - loop_end: The end point of the loop in beats
+    - looping: Whether looping is enabled
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_clip_loop", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "loop_start": loop_start,
+            "loop_end": loop_end,
+            "looping": looping
+        })
+        return f"Set clip loop: {result.get('loop_start')} - {result.get('loop_end')}, looping: {result.get('looping')}"
+    except Exception as e:
+        logger.error(f"Error setting clip loop: {str(e)}")
+        return f"Error setting clip loop: {str(e)}"
+
+# ==================== NOTE EDITING ====================
+
+@mcp.tool()
+def remove_notes(ctx: Context, track_index: int, clip_index: int, from_time: float = 0.0, time_span: float = 4.0, from_pitch: int = 0, pitch_span: int = 128) -> str:
+    """
+    Remove notes from a clip within a specified range.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot containing the clip
+    - from_time: Start time in beats
+    - time_span: Duration in beats
+    - from_pitch: Starting MIDI pitch (0-127)
+    - pitch_span: Number of pitches to include
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("remove_notes", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "from_time": from_time,
+            "time_span": time_span,
+            "from_pitch": from_pitch,
+            "pitch_span": pitch_span
+        })
+        return f"Removed notes from clip (time: {from_time}-{from_time + time_span}, pitch: {from_pitch}-{from_pitch + pitch_span})"
+    except Exception as e:
+        logger.error(f"Error removing notes: {str(e)}")
+        return f"Error removing notes: {str(e)}"
+
+@mcp.tool()
+def remove_all_notes(ctx: Context, track_index: int, clip_index: int) -> str:
+    """
+    Remove all notes from a clip.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot containing the clip
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("remove_all_notes", {
+            "track_index": track_index,
+            "clip_index": clip_index
+        })
+        return f"Removed all notes from clip at track {track_index}, slot {clip_index}"
+    except Exception as e:
+        logger.error(f"Error removing all notes: {str(e)}")
+        return f"Error removing all notes: {str(e)}"
+
+@mcp.tool()
+def transpose_notes(ctx: Context, track_index: int, clip_index: int, semitones: int) -> str:
+    """
+    Transpose all notes in a clip.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot containing the clip
+    - semitones: Number of semitones to transpose (positive = up, negative = down)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("transpose_notes", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "semitones": semitones
+        })
+        direction = "up" if semitones > 0 else "down"
+        return f"Transposed {result.get('note_count')} notes {direction} by {abs(semitones)} semitones"
+    except Exception as e:
+        logger.error(f"Error transposing notes: {str(e)}")
+        return f"Error transposing notes: {str(e)}"
+
+# ==================== UNDO/REDO ====================
+
+@mcp.tool()
+def undo(ctx: Context) -> str:
+    """Undo the last operation in Ableton."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("undo")
+        if result.get("undone"):
+            return "Undid last operation"
+        else:
+            return result.get("error", "Nothing to undo")
+    except Exception as e:
+        logger.error(f"Error undoing: {str(e)}")
+        return f"Error undoing: {str(e)}"
+
+@mcp.tool()
+def redo(ctx: Context) -> str:
+    """Redo the last undone operation in Ableton."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("redo")
+        if result.get("redone"):
+            return "Redid last operation"
+        else:
+            return result.get("error", "Nothing to redo")
+    except Exception as e:
+        logger.error(f"Error redoing: {str(e)}")
+        return f"Error redoing: {str(e)}"
 
 @mcp.tool()
 def get_browser_tree(ctx: Context, category_type: str = "all") -> str:
