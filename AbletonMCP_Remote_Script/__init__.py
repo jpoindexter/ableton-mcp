@@ -14,6 +14,8 @@ HOST = os.environ.get("ABLETON_MCP_HOST", "localhost")
 CLIENT_TIMEOUT = float(os.environ.get("ABLETON_MCP_CLIENT_TIMEOUT", "300.0"))  # 5 min timeout
 MAX_CLIENTS = int(os.environ.get("ABLETON_MCP_MAX_CLIENTS", "10"))
 MAX_BUFFER_SIZE = int(os.environ.get("ABLETON_MCP_MAX_BUFFER", "1048576"))  # 1MB
+COMMAND_TIMEOUT = float(os.environ.get("ABLETON_MCP_COMMAND_TIMEOUT", "30.0"))  # 30s for long operations
+MAX_QUEUE_SIZE = int(os.environ.get("ABLETON_MCP_MAX_QUEUE_SIZE", "100"))  # Response queue limit
 
 def create_instance(c_instance):
     """Create and return the AbletonMCP script instance"""
@@ -170,12 +172,12 @@ class AbletonMCP(ControlSurface):
                         self.log_message("Invalid UTF-8 data received: " + str(e))
                         continue
 
-                    buffer += decoded
-
-                    # Check buffer size limit to prevent memory DoS
-                    if len(buffer) > MAX_BUFFER_SIZE:
+                    # Check buffer size limit BEFORE appending to prevent memory DoS
+                    if len(buffer) + len(decoded) > MAX_BUFFER_SIZE:
                         self.log_message("Buffer overflow - client sent too much data")
                         break
+
+                    buffer += decoded
                     
                     try:
                         # Try to parse command from buffer
@@ -306,6 +308,27 @@ class AbletonMCP(ControlSurface):
                 response["result"] = self._is_session_modified()
             elif command_type == "get_metronome_state":
                 response["result"] = self._get_metronome_state()
+            # Color getters (read-only)
+            elif command_type == "get_track_color":
+                track_index = params.get("track_index", 0)
+                response["result"] = self._get_track_color(track_index)
+            elif command_type == "get_clip_color":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_clip_color(track_index, clip_index)
+            elif command_type == "get_scene_color":
+                scene_index = params.get("scene_index", 0)
+                response["result"] = self._get_scene_color(scene_index)
+            # Clip loop getter (read-only)
+            elif command_type == "get_clip_loop":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_clip_loop(track_index, clip_index)
+            # Send level getter (read-only)
+            elif command_type == "get_send_level":
+                track_index = params.get("track_index", 0)
+                send_index = params.get("send_index", 0)
+                response["result"] = self._get_send_level(track_index, send_index)
             # Music theory queries (no modification needed)
             elif command_type == "get_scale_notes":
                 root = params.get("root", 0)
@@ -315,7 +338,8 @@ class AbletonMCP(ControlSurface):
             elif command_type in ["create_midi_track", "create_audio_track", "set_track_name",
                                  "set_track_mute", "set_track_solo", "set_track_arm",
                                  "set_track_volume", "set_track_pan",
-                                 "delete_track", "duplicate_track", "set_track_color",
+                                 "delete_track", "duplicate_track", "freeze_track", "flatten_track",
+                                 "set_track_color",
                                  "create_clip", "delete_clip", "add_notes_to_clip", "set_clip_name",
                                  "duplicate_clip", "set_clip_color", "set_clip_loop",
                                  "remove_notes", "remove_all_notes", "transpose_notes",
@@ -335,7 +359,10 @@ class AbletonMCP(ControlSurface):
                                  "quantize_clip_notes", "humanize_clip_timing", "humanize_clip_velocity",
                                  "generate_drum_pattern", "generate_bassline",
                                  # Audio clip editing
-                                 "set_clip_gain", "set_clip_pitch", "set_clip_warp_mode", "get_clip_warp_info",
+                                 "get_clip_gain", "get_clip_pitch", "set_clip_gain", "set_clip_pitch",
+                                 "set_clip_warp_mode", "get_clip_warp_info",
+                                 # Warp markers
+                                 "get_warp_markers", "add_warp_marker", "delete_warp_marker",
                                  # Clip automation
                                  "get_clip_automation", "set_clip_automation", "clear_clip_automation",
                                  # Group tracks
@@ -346,8 +373,8 @@ class AbletonMCP(ControlSurface):
                                  "get_device_by_name", "load_device_preset", "get_rack_chains", "select_rack_chain",
                                  # Groove pool
                                  "get_groove_pool", "apply_groove", "commit_groove"]:
-                # Use a thread-safe approach with a response queue
-                response_queue = queue.Queue()
+                # Use a thread-safe approach with a bounded response queue
+                response_queue = queue.Queue(maxsize=MAX_QUEUE_SIZE)
                 
                 # Define a function to execute on the main thread
                 def main_thread_task():
@@ -462,6 +489,12 @@ class AbletonMCP(ControlSurface):
                         elif command_type == "duplicate_track":
                             track_index = params.get("track_index", 0)
                             result = self._duplicate_track(track_index)
+                        elif command_type == "freeze_track":
+                            track_index = params.get("track_index", 0)
+                            result = self._freeze_track(track_index)
+                        elif command_type == "flatten_track":
+                            track_index = params.get("track_index", 0)
+                            result = self._flatten_track(track_index)
                         elif command_type == "set_track_color":
                             track_index = params.get("track_index", 0)
                             color = params.get("color", 0)
@@ -621,6 +654,14 @@ class AbletonMCP(ControlSurface):
                         # ============================================
                         # Audio Clip Editing
                         # ============================================
+                        elif command_type == "get_clip_gain":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._get_clip_gain(track_index, clip_index)
+                        elif command_type == "get_clip_pitch":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._get_clip_pitch(track_index, clip_index)
                         elif command_type == "set_clip_gain":
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
@@ -640,6 +681,21 @@ class AbletonMCP(ControlSurface):
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
                             result = self._get_clip_warp_info(track_index, clip_index)
+                        elif command_type == "get_warp_markers":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._get_warp_markers(track_index, clip_index)
+                        elif command_type == "add_warp_marker":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            beat_time = params.get("beat_time", 0.0)
+                            sample_time = params.get("sample_time", None)
+                            result = self._add_warp_marker(track_index, clip_index, beat_time, sample_time)
+                        elif command_type == "delete_warp_marker":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            beat_time = params.get("beat_time", 0.0)
+                            result = self._delete_warp_marker(track_index, clip_index, beat_time)
 
                         # ============================================
                         # Clip Automation
@@ -740,9 +796,9 @@ class AbletonMCP(ControlSurface):
                     # If we're already on the main thread, execute directly
                     main_thread_task()
                 
-                # Wait for the response with a timeout
+                # Wait for the response with a configurable timeout
                 try:
-                    task_response = response_queue.get(timeout=10.0)
+                    task_response = response_queue.get(timeout=COMMAND_TIMEOUT)
                     if task_response.get("status") == "error":
                         response["status"] = "error"
                         response["message"] = task_response.get("message", "Unknown error")
@@ -1920,6 +1976,22 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error setting scene name: " + str(e))
             raise
 
+    def _get_scene_color(self, scene_index):
+        """Get the color of a scene"""
+        try:
+            if scene_index < 0 or scene_index >= len(self._song.scenes):
+                raise IndexError("Scene index out of range")
+
+            scene = self._song.scenes[scene_index]
+            result = {
+                "scene_index": scene_index,
+                "color_index": scene.color_index if hasattr(scene, 'color_index') else None
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting scene color: " + str(e))
+            raise
+
     def _set_scene_color(self, scene_index, color):
         """Set the color of a scene"""
         try:
@@ -1998,6 +2070,77 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error duplicating track: " + str(e))
+            raise
+
+    def _freeze_track(self, track_index):
+        """Freeze a track (render all devices to audio)"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            # Check if track can be frozen
+            if not hasattr(track, 'freeze') or track.is_frozen:
+                return {
+                    "track_index": track_index,
+                    "success": False,
+                    "message": "Track cannot be frozen or is already frozen"
+                }
+
+            track.freeze()
+
+            return {
+                "track_index": track_index,
+                "name": track.name,
+                "success": True,
+                "is_frozen": track.is_frozen
+            }
+        except Exception as e:
+            self.log_message("Error freezing track: " + str(e))
+            raise
+
+    def _flatten_track(self, track_index):
+        """Flatten a frozen track (convert freeze to permanent audio)"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            # Track must be frozen to flatten
+            if not hasattr(track, 'flatten') or not track.is_frozen:
+                return {
+                    "track_index": track_index,
+                    "success": False,
+                    "message": "Track must be frozen before it can be flattened"
+                }
+
+            track.flatten()
+
+            return {
+                "track_index": track_index,
+                "name": track.name,
+                "success": True
+            }
+        except Exception as e:
+            self.log_message("Error flattening track: " + str(e))
+            raise
+
+    def _get_track_color(self, track_index):
+        """Get the color of a track"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+            result = {
+                "track_index": track_index,
+                "color_index": track.color_index if hasattr(track, 'color_index') else None
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting track color: " + str(e))
             raise
 
     def _set_track_color(self, track_index, color):
@@ -2117,6 +2260,33 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error duplicating clip: " + str(e))
             raise
 
+    def _get_clip_color(self, track_index, clip_index):
+        """Get the color of a clip"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+
+            clip_slot = track.clip_slots[clip_index]
+
+            if not clip_slot.has_clip:
+                raise Exception("No clip in slot")
+
+            clip = clip_slot.clip
+            result = {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "color_index": clip.color_index if hasattr(clip, 'color_index') else None
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting clip color: " + str(e))
+            raise
+
     def _set_clip_color(self, track_index, clip_index, color):
         """Set the color of a clip"""
         try:
@@ -2145,6 +2315,35 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error setting clip color: " + str(e))
+            raise
+
+    def _get_clip_loop(self, track_index, clip_index):
+        """Get the loop settings of a clip"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+
+            clip_slot = track.clip_slots[clip_index]
+
+            if not clip_slot.has_clip:
+                raise Exception("No clip in slot")
+
+            clip = clip_slot.clip
+            result = {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "looping": clip.looping,
+                "loop_start": clip.loop_start,
+                "loop_end": clip.loop_end
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting clip loop: " + str(e))
             raise
 
     def _set_clip_loop(self, track_index, clip_index, loop_start, loop_end, looping):
@@ -2395,6 +2594,28 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error getting return track info: " + str(e))
+            raise
+
+    def _get_send_level(self, track_index, send_index):
+        """Get the send level from a track to a return track"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+            sends = track.mixer_device.sends
+
+            if send_index < 0 or send_index >= len(sends):
+                raise IndexError("Send index out of range")
+
+            result = {
+                "track_index": track_index,
+                "send_index": send_index,
+                "level": sends[send_index].value
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting send level: " + str(e))
             raise
 
     def _set_send_level(self, track_index, send_index, level):
@@ -3349,6 +3570,54 @@ class AbletonMCP(ControlSurface):
     # Audio Clip Editing
     # =========================================================================
 
+    def _get_clip_gain(self, track_index, clip_index):
+        """Get the gain of an audio clip"""
+        try:
+            clip_slot = self._validate_clip_slot(track_index, clip_index)
+            if not clip_slot.has_clip:
+                raise ValueError("No clip in slot")
+
+            clip = clip_slot.clip
+
+            if not clip.is_audio_clip:
+                raise ValueError("Clip is not an audio clip")
+
+            # Convert linear gain to dB
+            import math
+            gain_db = 20.0 * math.log10(clip.gain) if clip.gain > 0 else -60.0
+
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "gain_db": round(gain_db, 2),
+                "gain_linear": clip.gain
+            }
+        except Exception as e:
+            self.log_message("Error getting clip gain: " + str(e))
+            raise
+
+    def _get_clip_pitch(self, track_index, clip_index):
+        """Get the pitch shift of an audio clip in semitones"""
+        try:
+            clip_slot = self._validate_clip_slot(track_index, clip_index)
+            if not clip_slot.has_clip:
+                raise ValueError("No clip in slot")
+
+            clip = clip_slot.clip
+
+            if not clip.is_audio_clip:
+                raise ValueError("Clip is not an audio clip")
+
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "pitch_coarse": clip.pitch_coarse,
+                "pitch_fine": clip.pitch_fine if hasattr(clip, 'pitch_fine') else 0
+            }
+        except Exception as e:
+            self.log_message("Error getting clip pitch: " + str(e))
+            raise
+
     def _set_clip_gain(self, track_index, clip_index, gain):
         """Set the gain of an audio clip in dB"""
         try:
@@ -3464,6 +3733,95 @@ class AbletonMCP(ControlSurface):
             }
         except Exception as e:
             self.log_message("Error getting warp info: " + str(e))
+            raise
+
+    def _get_warp_markers(self, track_index, clip_index):
+        """Get all warp markers from an audio clip"""
+        try:
+            clip_slot = self._validate_clip_slot(track_index, clip_index)
+            if not clip_slot.has_clip:
+                raise ValueError("No clip in slot")
+
+            clip = clip_slot.clip
+
+            # Check if this is an audio clip with warp markers
+            if not hasattr(clip, 'warp_markers') or clip.is_midi_clip:
+                return {
+                    "track_index": track_index,
+                    "clip_index": clip_index,
+                    "error": "Clip does not support warp markers (MIDI clip or no warp_markers attribute)",
+                    "warp_markers": []
+                }
+
+            markers = []
+            for i, marker in enumerate(clip.warp_markers):
+                markers.append({
+                    "index": i,
+                    "beat_time": marker.beat_time,
+                    "sample_time": marker.sample_time
+                })
+
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "warp_markers": markers,
+                "count": len(markers)
+            }
+        except Exception as e:
+            self.log_message("Error getting warp markers: " + str(e))
+            raise
+
+    def _add_warp_marker(self, track_index, clip_index, beat_time, sample_time=None):
+        """Add a warp marker to an audio clip"""
+        try:
+            clip_slot = self._validate_clip_slot(track_index, clip_index)
+            if not clip_slot.has_clip:
+                raise ValueError("No clip in slot")
+
+            clip = clip_slot.clip
+
+            if not hasattr(clip, 'insert_warp_marker') or clip.is_midi_clip:
+                raise ValueError("Clip does not support warp markers")
+
+            # Insert warp marker at beat time
+            # Note: sample_time is calculated automatically if not provided
+            if sample_time is not None:
+                clip.insert_warp_marker(beat_time, sample_time)
+            else:
+                clip.insert_warp_marker(beat_time)
+
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "beat_time": beat_time,
+                "success": True
+            }
+        except Exception as e:
+            self.log_message("Error adding warp marker: " + str(e))
+            raise
+
+    def _delete_warp_marker(self, track_index, clip_index, beat_time):
+        """Remove a warp marker from an audio clip"""
+        try:
+            clip_slot = self._validate_clip_slot(track_index, clip_index)
+            if not clip_slot.has_clip:
+                raise ValueError("No clip in slot")
+
+            clip = clip_slot.clip
+
+            if not hasattr(clip, 'remove_warp_marker') or clip.is_midi_clip:
+                raise ValueError("Clip does not support warp markers")
+
+            clip.remove_warp_marker(beat_time)
+
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "beat_time": beat_time,
+                "success": True
+            }
+        except Exception as e:
+            self.log_message("Error deleting warp marker: " + str(e))
             raise
 
     # =========================================================================

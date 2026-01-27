@@ -3,9 +3,10 @@ from mcp.server.fastmcp import FastMCP, Context
 import socket
 import json
 import logging
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Dict, Any, List, Union
+from typing import AsyncIterator, Dict, Any, List, Union, Optional
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -16,7 +17,7 @@ logger = logging.getLogger("AbletonMCPServer")
 class AbletonConnection:
     host: str
     port: int
-    sock: socket.socket = None
+    sock: Optional[socket.socket] = field(default=None)
     
     def connect(self) -> bool:
         """Connect to the Ableton Remote Script socket server"""
@@ -135,7 +136,6 @@ class AbletonConnection:
             
             # For state-modifying commands, add a small delay to give Ableton time to process
             if is_modifying_command:
-                import time
                 time.sleep(0.1)  # 100ms delay
             
             # Set timeout based on command type
@@ -156,7 +156,6 @@ class AbletonConnection:
             
             # For state-modifying commands, add another small delay after receiving response
             if is_modifying_command:
-                import time
                 time.sleep(0.1)  # 100ms delay
             
             return response.get("result", {})
@@ -217,18 +216,17 @@ def get_ableton_connection():
     
     if _ableton_connection is not None:
         try:
-            # Test the connection with a simple ping
-            # We'll try to send an empty message, which should fail if the connection is dead
-            # but won't affect Ableton if it's alive
-            _ableton_connection.sock.settimeout(1.0)
-            _ableton_connection.sock.sendall(b'')
+            # Test the connection with a proper health check command
+            # Empty bytes sendall() is unreliable - some implementations ignore it
+            _ableton_connection.sock.settimeout(2.0)
+            _ableton_connection.send_command("health_check")
             return _ableton_connection
         except Exception as e:
             logger.warning(f"Existing connection is no longer valid: {str(e)}")
             try:
                 _ableton_connection.disconnect()
-            except:
-                pass
+            except Exception:
+                pass  # Ignore disconnect errors when connection is already invalid
             _ableton_connection = None
     
     # Connection doesn't exist or is invalid, create a new one
@@ -263,7 +261,6 @@ def get_ableton_connection():
             
             # Wait before trying again, but only if we have more attempts left
             if attempt < max_attempts:
-                import time
                 time.sleep(1.0)
         
         # If we get here, all connection attempts failed
@@ -322,7 +319,7 @@ def get_session_info(ctx: Context) -> str:
 def get_track_info(ctx: Context, track_index: int) -> str:
     """
     Get detailed information about a specific track in Ableton.
-    
+
     Parameters:
     - track_index: The index of the track to get information about
     """
@@ -333,6 +330,98 @@ def get_track_info(ctx: Context, track_index: int) -> str:
     except Exception as e:
         logger.error(f"Error getting track info from Ableton: {str(e)}")
         return f"Error getting track info: {str(e)}"
+
+@mcp.tool()
+def get_track_color(ctx: Context, track_index: int) -> str:
+    """
+    Get the color of a track.
+
+    Parameters:
+    - track_index: The index of the track
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_track_color", {"track_index": track_index})
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting track color: {str(e)}")
+        return f"Error getting track color: {str(e)}"
+
+@mcp.tool()
+def get_clip_color(ctx: Context, track_index: int, clip_index: int) -> str:
+    """
+    Get the color of a clip.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_clip_color", {
+            "track_index": track_index,
+            "clip_index": clip_index
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting clip color: {str(e)}")
+        return f"Error getting clip color: {str(e)}"
+
+@mcp.tool()
+def get_scene_color(ctx: Context, scene_index: int) -> str:
+    """
+    Get the color of a scene.
+
+    Parameters:
+    - scene_index: The index of the scene
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_scene_color", {"scene_index": scene_index})
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting scene color: {str(e)}")
+        return f"Error getting scene color: {str(e)}"
+
+@mcp.tool()
+def get_clip_loop(ctx: Context, track_index: int, clip_index: int) -> str:
+    """
+    Get the loop settings of a clip.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_clip_loop", {
+            "track_index": track_index,
+            "clip_index": clip_index
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting clip loop: {str(e)}")
+        return f"Error getting clip loop: {str(e)}"
+
+@mcp.tool()
+def get_send_level(ctx: Context, track_index: int, send_index: int) -> str:
+    """
+    Get the send level from a track to a return track.
+
+    Parameters:
+    - track_index: The index of the source track
+    - send_index: The index of the send (0=A, 1=B, etc.)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_send_level", {
+            "track_index": track_index,
+            "send_index": send_index
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting send level: {str(e)}")
+        return f"Error getting send level: {str(e)}"
 
 @mcp.tool()
 def create_midi_track(ctx: Context, index: int = -1) -> str:
@@ -897,6 +986,45 @@ def duplicate_track(ctx: Context, track_index: int) -> str:
     except Exception as e:
         logger.error(f"Error duplicating track: {str(e)}")
         return f"Error duplicating track: {str(e)}"
+
+@mcp.tool()
+def freeze_track(ctx: Context, track_index: int) -> str:
+    """
+    Freeze a track (render all devices to audio for CPU optimization).
+
+    Parameters:
+    - track_index: The index of the track to freeze
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("freeze_track", {"track_index": track_index})
+        if result.get("success"):
+            return f"Froze track {track_index} '{result.get('name')}'"
+        else:
+            return f"Could not freeze track: {result.get('message')}"
+    except Exception as e:
+        logger.error(f"Error freezing track: {str(e)}")
+        return f"Error freezing track: {str(e)}"
+
+@mcp.tool()
+def flatten_track(ctx: Context, track_index: int) -> str:
+    """
+    Flatten a frozen track (convert freeze to permanent audio).
+    The track must be frozen first.
+
+    Parameters:
+    - track_index: The index of the track to flatten
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("flatten_track", {"track_index": track_index})
+        if result.get("success"):
+            return f"Flattened track {track_index} '{result.get('name')}'"
+        else:
+            return f"Could not flatten track: {result.get('message')}"
+    except Exception as e:
+        logger.error(f"Error flattening track: {str(e)}")
+        return f"Error flattening track: {str(e)}"
 
 @mcp.tool()
 def set_track_color(ctx: Context, track_index: int, color: int) -> str:
@@ -2196,6 +2324,76 @@ def get_clip_warp_info(ctx: Context, track_index: int, clip_index: int) -> str:
     except Exception as e:
         logger.error(f"Error getting warp info: {str(e)}")
         return f"Error getting warp info: {str(e)}"
+
+# ==================== WARP MARKERS ====================
+
+@mcp.tool()
+def get_warp_markers(ctx: Context, track_index: int, clip_index: int) -> str:
+    """
+    Get all warp markers from an audio clip.
+
+    Parameters:
+    - track_index: The index of the track
+    - clip_index: The index of the clip slot
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_warp_markers", {
+            "track_index": track_index,
+            "clip_index": clip_index
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting warp markers: {str(e)}")
+        return f"Error getting warp markers: {str(e)}"
+
+@mcp.tool()
+def add_warp_marker(ctx: Context, track_index: int, clip_index: int, beat_time: float, sample_time: float = None) -> str:
+    """
+    Add a warp marker to an audio clip.
+
+    Parameters:
+    - track_index: The index of the track
+    - clip_index: The index of the clip slot
+    - beat_time: The beat time position for the marker
+    - sample_time: Optional sample time (calculated automatically if not provided)
+    """
+    try:
+        ableton = get_ableton_connection()
+        params = {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "beat_time": beat_time
+        }
+        if sample_time is not None:
+            params["sample_time"] = sample_time
+        result = ableton.send_command("add_warp_marker", params)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error adding warp marker: {str(e)}")
+        return f"Error adding warp marker: {str(e)}"
+
+@mcp.tool()
+def delete_warp_marker(ctx: Context, track_index: int, clip_index: int, beat_time: float) -> str:
+    """
+    Delete a warp marker from an audio clip.
+
+    Parameters:
+    - track_index: The index of the track
+    - clip_index: The index of the clip slot
+    - beat_time: The beat time position of the marker to delete
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("delete_warp_marker", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "beat_time": beat_time
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error deleting warp marker: {str(e)}")
+        return f"Error deleting warp marker: {str(e)}"
 
 # ==================== CLIP AUTOMATION ====================
 

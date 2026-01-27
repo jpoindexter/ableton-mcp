@@ -39,6 +39,16 @@ CONNECT_TIMEOUT = float(os.environ.get("ABLETON_CONNECT_TIMEOUT", "5.0"))
 RECV_TIMEOUT = float(os.environ.get("ABLETON_RECV_TIMEOUT", "15.0"))
 MAX_BUFFER_SIZE = int(os.environ.get("ABLETON_MAX_BUFFER", "1048576"))  # 1MB max
 
+# API Key Authentication (optional - set REST_API_KEY env var to enable)
+# When enabled, all requests must include X-API-Key header
+REST_API_KEY = os.environ.get("REST_API_KEY", None)
+API_KEY_ENABLED = REST_API_KEY is not None and len(REST_API_KEY) > 0
+
+# Rate Limiting Configuration (requests per minute per IP)
+RATE_LIMIT_ENABLED = os.environ.get("RATE_LIMIT_ENABLED", "true").lower() == "true"
+RATE_LIMIT_REQUESTS = int(os.environ.get("RATE_LIMIT_REQUESTS", "100"))
+RATE_LIMIT_WINDOW = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))  # seconds
+
 # Command whitelist for security
 ALLOWED_COMMANDS = {
     # Transport
@@ -46,7 +56,8 @@ ALLOWED_COMMANDS = {
     "get_session_info", "set_tempo", "undo", "redo",
     # Tracks
     "create_midi_track", "create_audio_track", "delete_track", "duplicate_track",
-    "get_track_info", "set_track_name", "set_track_mute", "set_track_solo",
+    "freeze_track", "flatten_track",
+    "get_track_info", "get_track_color", "set_track_name", "set_track_mute", "set_track_solo",
     "set_track_arm", "set_track_volume", "set_track_pan", "set_track_color",
     "select_track", "get_track_input_routing", "get_track_output_routing",
     "set_track_input_routing", "set_track_output_routing",
@@ -54,25 +65,28 @@ ALLOWED_COMMANDS = {
     "set_track_monitoring", "get_track_monitoring",
     # Clips
     "create_clip", "delete_clip", "fire_clip", "stop_clip", "duplicate_clip",
-    "get_clip_info", "get_clip_notes", "set_clip_name", "set_clip_color",
-    "set_clip_loop", "add_notes_to_clip", "remove_notes", "remove_all_notes",
-    "transpose_notes", "select_clip",
+    "get_clip_info", "get_clip_notes", "get_clip_color", "get_clip_loop",
+    "set_clip_name", "set_clip_color", "set_clip_loop", "add_notes_to_clip",
+    "remove_notes", "remove_all_notes", "transpose_notes", "select_clip",
     # Audio clip editing
-    "set_clip_gain", "set_clip_pitch", "set_clip_warp_mode", "get_clip_warp_info",
+    "get_clip_gain", "get_clip_pitch", "set_clip_gain", "set_clip_pitch",
+    "set_clip_warp_mode", "get_clip_warp_info",
+    # Warp markers
+    "get_warp_markers", "add_warp_marker", "delete_warp_marker",
     # Scenes
     "get_all_scenes", "create_scene", "delete_scene", "fire_scene", "stop_scene",
-    "duplicate_scene", "set_scene_name", "set_scene_color", "select_scene",
+    "duplicate_scene", "set_scene_name", "get_scene_color", "set_scene_color", "select_scene",
     # Devices
     "get_device_parameters", "set_device_parameter", "toggle_device", "delete_device",
     "get_device_by_name", "load_device_preset",
     # Rack chains
-    "get_rack_chains", "select_rack_chain", "create_rack_chain", "delete_rack_chain",
+    "get_rack_chains", "select_rack_chain",
     # Browser
     "browse_path", "get_browser_children", "search_browser", "get_browser_tree",
     "get_browser_items_at_path", "load_browser_item", "load_instrument_or_effect",
     "load_browser_item_to_return",
     # Return tracks
-    "get_return_tracks", "get_return_track_info", "set_send_level",
+    "get_return_tracks", "get_return_track_info", "get_send_level", "set_send_level",
     "set_return_volume", "set_return_pan",
     # Master track
     "get_master_info", "set_master_volume", "set_master_pan",
@@ -268,7 +282,7 @@ app = FastAPI(
 
 # CORS configuration - restrict to local development by default
 # Set CORS_ORIGINS environment variable to allow additional origins
-CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")]
 
 app.add_middleware(
     CORSMiddleware,
@@ -285,9 +299,10 @@ from fastapi import Request
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled exception: {str(exc)}")
+    # Sanitize error message to avoid leaking internal details
     return JSONResponse(
         status_code=500,
-        content={"error": str(exc), "detail": "An unexpected error occurred"}
+        content={"error": "Internal server error", "detail": "An unexpected error occurred"}
     )
 
 @app.exception_handler(HTTPException)
@@ -296,6 +311,136 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         status_code=exc.status_code,
         content={"error": exc.detail}
     )
+
+# ============================================================================
+# API Key Authentication Middleware
+# ============================================================================
+
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class APIKeyMiddleware(BaseHTTPMiddleware):
+    """Middleware to validate API key on all requests (if enabled)."""
+
+    async def dispatch(self, request: Request, call_next):
+        # Skip auth for OpenAPI docs and health endpoints
+        if request.url.path in ["/docs", "/openapi.json", "/redoc", "/api/health"]:
+            return await call_next(request)
+
+        if API_KEY_ENABLED:
+            api_key = request.headers.get("X-API-Key")
+            if api_key is None:
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": "API key required. Set X-API-Key header."}
+                )
+            if api_key != REST_API_KEY:
+                return JSONResponse(
+                    status_code=403,
+                    content={"error": "Invalid API key"}
+                )
+
+        return await call_next(request)
+
+# Add API key middleware if enabled
+if API_KEY_ENABLED:
+    app.add_middleware(APIKeyMiddleware)
+    logger.info("API Key authentication enabled")
+
+# ============================================================================
+# Rate Limiting Middleware
+# ============================================================================
+
+import time as time_module
+from collections import defaultdict
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Simple in-memory rate limiter by client IP."""
+
+    def __init__(self, app, requests_limit: int, window_seconds: int):
+        super().__init__(app)
+        self.requests_limit = requests_limit
+        self.window_seconds = window_seconds
+        self.request_counts = defaultdict(list)
+        self._lock = threading.Lock()
+
+    def _get_client_ip(self, request: Request) -> str:
+        """Get client IP, handling proxies."""
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return request.client.host if request.client else "unknown"
+
+    def _cleanup_old_requests(self, client_ip: str, current_time: float):
+        """Remove requests outside the time window."""
+        cutoff = current_time - self.window_seconds
+        self.request_counts[client_ip] = [
+            t for t in self.request_counts[client_ip] if t > cutoff
+        ]
+
+    async def dispatch(self, request: Request, call_next):
+        # Skip rate limiting for health checks
+        if request.url.path == "/api/health":
+            return await call_next(request)
+
+        client_ip = self._get_client_ip(request)
+        current_time = time_module.time()
+
+        with self._lock:
+            self._cleanup_old_requests(client_ip, current_time)
+
+            if len(self.request_counts[client_ip]) >= self.requests_limit:
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "error": "Rate limit exceeded",
+                        "detail": f"Maximum {self.requests_limit} requests per {self.window_seconds} seconds"
+                    }
+                )
+
+            self.request_counts[client_ip].append(current_time)
+
+        return await call_next(request)
+
+# Add rate limiting middleware if enabled
+if RATE_LIMIT_ENABLED:
+    app.add_middleware(RateLimitMiddleware, requests_limit=RATE_LIMIT_REQUESTS, window_seconds=RATE_LIMIT_WINDOW)
+    logger.info(f"Rate limiting enabled: {RATE_LIMIT_REQUESTS} requests per {RATE_LIMIT_WINDOW}s")
+
+# ============================================================================
+# Index Validation Constants
+# ============================================================================
+
+# Maximum valid indices (Ableton has limits)
+MAX_TRACK_INDEX = 999  # Ableton allows up to 1000 tracks
+MAX_CLIP_INDEX = 999   # Clips per track
+MAX_SCENE_INDEX = 999  # Scenes
+MAX_DEVICE_INDEX = 127 # Devices per track
+MAX_PARAMETER_INDEX = 255  # Parameters per device
+MAX_SEND_INDEX = 11    # Return tracks (A-L)
+
+def validate_track_index(v: int) -> int:
+    """Validate track index is within bounds."""
+    if v < 0 or v > MAX_TRACK_INDEX:
+        raise ValueError(f'Track index must be between 0 and {MAX_TRACK_INDEX}')
+    return v
+
+def validate_clip_index(v: int) -> int:
+    """Validate clip/scene index is within bounds."""
+    if v < 0 or v > MAX_CLIP_INDEX:
+        raise ValueError(f'Clip index must be between 0 and {MAX_CLIP_INDEX}')
+    return v
+
+def validate_scene_index(v: int) -> int:
+    """Validate scene index is within bounds."""
+    if v < 0 or v > MAX_SCENE_INDEX:
+        raise ValueError(f'Scene index must be between 0 and {MAX_SCENE_INDEX}')
+    return v
+
+def validate_device_index(v: int) -> int:
+    """Validate device index is within bounds."""
+    if v < 0 or v > MAX_DEVICE_INDEX:
+        raise ValueError(f'Device index must be between 0 and {MAX_DEVICE_INDEX}')
+    return v
 
 # ============================================================================
 # Request Models
@@ -407,6 +552,13 @@ class Note(BaseModel):
     def validate_duration(cls, v):
         if v <= 0:
             raise ValueError('Duration must be positive')
+        return v
+
+    @field_validator('start_time')
+    @classmethod
+    def validate_start_time(cls, v):
+        if v < 0:
+            raise ValueError('Start time must be non-negative')
         return v
 
 class AddNotesRequest(BaseModel):
@@ -607,9 +759,21 @@ def delete_track(track_index: int):
 def duplicate_track(track_index: int):
     return ableton.send_command("duplicate_track", {"track_index": track_index})
 
+@app.post("/api/tracks/{track_index}/freeze")
+def freeze_track(track_index: int):
+    return ableton.send_command("freeze_track", {"track_index": track_index})
+
+@app.post("/api/tracks/{track_index}/flatten")
+def flatten_track(track_index: int):
+    return ableton.send_command("flatten_track", {"track_index": track_index})
+
 @app.put("/api/tracks/{track_index}/name")
 def set_track_name(track_index: int, req: TrackNameRequest):
     return ableton.send_command("set_track_name", {"track_index": track_index, "name": req.name})
+
+@app.get("/api/tracks/{track_index}/color")
+def get_track_color(track_index: int):
+    return ableton.send_command("get_track_color", {"track_index": track_index})
 
 @app.put("/api/tracks/{track_index}/color")
 def set_track_color(track_index: int, req: TrackColorRequest):
@@ -677,12 +841,26 @@ def set_clip_name(track_index: int, clip_index: int, req: ClipNameRequest):
         "name": req.name
     })
 
+@app.get("/api/tracks/{track_index}/clips/{clip_index}/color")
+def get_clip_color(track_index: int, clip_index: int):
+    return ableton.send_command("get_clip_color", {
+        "track_index": track_index,
+        "clip_index": clip_index
+    })
+
 @app.put("/api/tracks/{track_index}/clips/{clip_index}/color")
 def set_clip_color(track_index: int, clip_index: int, req: ClipColorRequest):
     return ableton.send_command("set_clip_color", {
         "track_index": track_index,
         "clip_index": clip_index,
         "color": req.color
+    })
+
+@app.get("/api/tracks/{track_index}/clips/{clip_index}/loop")
+def get_clip_loop(track_index: int, clip_index: int):
+    return ableton.send_command("get_clip_loop", {
+        "track_index": track_index,
+        "clip_index": clip_index
     })
 
 @app.put("/api/tracks/{track_index}/clips/{clip_index}/loop")
@@ -728,6 +906,55 @@ def transpose_notes(track_index: int, clip_index: int, req: TransposeRequest):
         "semitones": req.semitones
     })
 
+# Warp Markers
+@app.get("/api/tracks/{track_index}/clips/{clip_index}/warp-markers")
+def get_warp_markers(track_index: int, clip_index: int):
+    return ableton.send_command("get_warp_markers", {
+        "track_index": track_index,
+        "clip_index": clip_index
+    })
+
+class WarpMarkerRequest(BaseModel):
+    beat_time: float
+    sample_time: Optional[float] = None
+
+@app.post("/api/tracks/{track_index}/clips/{clip_index}/warp-markers")
+def add_warp_marker(track_index: int, clip_index: int, req: WarpMarkerRequest):
+    params = {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "beat_time": req.beat_time
+    }
+    if req.sample_time is not None:
+        params["sample_time"] = req.sample_time
+    return ableton.send_command("add_warp_marker", params)
+
+class DeleteWarpMarkerRequest(BaseModel):
+    beat_time: float
+
+@app.delete("/api/tracks/{track_index}/clips/{clip_index}/warp-markers")
+def delete_warp_marker(track_index: int, clip_index: int, req: DeleteWarpMarkerRequest):
+    return ableton.send_command("delete_warp_marker", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "beat_time": req.beat_time
+    })
+
+# Audio Clip Properties
+@app.get("/api/tracks/{track_index}/clips/{clip_index}/gain")
+def get_clip_gain(track_index: int, clip_index: int):
+    return ableton.send_command("get_clip_gain", {
+        "track_index": track_index,
+        "clip_index": clip_index
+    })
+
+@app.get("/api/tracks/{track_index}/clips/{clip_index}/pitch")
+def get_clip_pitch(track_index: int, clip_index: int):
+    return ableton.send_command("get_clip_pitch", {
+        "track_index": track_index,
+        "clip_index": clip_index
+    })
+
 # Scenes
 @app.get("/api/scenes")
 def get_all_scenes():
@@ -757,9 +984,16 @@ def duplicate_scene(scene_index: int):
 def set_scene_name(scene_index: int, req: SceneNameRequest):
     return ableton.send_command("set_scene_name", {"scene_index": scene_index, "name": req.name})
 
+class SceneColorRequest(BaseModel):
+    color: int
+
+@app.get("/api/scenes/{scene_index}/color")
+def get_scene_color(scene_index: int):
+    return ableton.send_command("get_scene_color", {"scene_index": scene_index})
+
 @app.put("/api/scenes/{scene_index}/color")
-def set_scene_color(scene_index: int, color: int):
-    return ableton.send_command("set_scene_color", {"scene_index": scene_index, "color": color})
+def set_scene_color(scene_index: int, req: SceneColorRequest):
+    return ableton.send_command("set_scene_color", {"scene_index": scene_index, "color": req.color})
 
 @app.post("/api/scenes/{scene_index}/select")
 def select_scene(scene_index: int):
@@ -795,6 +1029,13 @@ def delete_device(track_index: int, device_index: int):
 @app.get("/api/returns")
 def get_return_tracks():
     return ableton.send_command("get_return_tracks")
+
+@app.get("/api/tracks/{track_index}/sends/{send_index}")
+def get_send_level(track_index: int, send_index: int):
+    return ableton.send_command("get_send_level", {
+        "track_index": track_index,
+        "send_index": send_index
+    })
 
 @app.post("/api/tracks/{track_index}/sends/{send_index}")
 def set_send_level(track_index: int, send_index: int, req: SendLevelRequest):
@@ -1165,17 +1406,26 @@ TOOL_DEFINITIONS = [
 # Main
 # ============================================================================
 
+# Server host configuration - default to localhost for security
+# Set REST_API_HOST environment variable to override (e.g., "0.0.0.0" for network access)
+REST_API_HOST = os.environ.get("REST_API_HOST", "127.0.0.1")
+REST_API_PORT = int(os.environ.get("REST_API_PORT", "8000"))
+
 if __name__ == "__main__":
     print("=" * 60)
     print("AbletonMCP REST API Server")
     print("=" * 60)
     print("Endpoints:")
-    print("  - Health:     GET  http://localhost:8000/health")
-    print("  - Tools:      GET  http://localhost:8000/tools")
-    print("  - Command:    POST http://localhost:8000/api/command")
-    print("  - API Docs:   GET  http://localhost:8000/docs")
+    print(f"  - Health:     GET  http://{REST_API_HOST}:{REST_API_PORT}/health")
+    print(f"  - Tools:      GET  http://{REST_API_HOST}:{REST_API_PORT}/tools")
+    print(f"  - Command:    POST http://{REST_API_HOST}:{REST_API_PORT}/api/command")
+    print(f"  - API Docs:   GET  http://{REST_API_HOST}:{REST_API_PORT}/docs")
     print("")
     print("For Ollama integration, use the /api/command endpoint")
     print("with function calling.")
+    if REST_API_HOST == "127.0.0.1":
+        print("")
+        print("NOTE: Server bound to localhost only for security.")
+        print("Set REST_API_HOST=0.0.0.0 to allow network access.")
     print("=" * 60)
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=REST_API_HOST, port=REST_API_PORT)
