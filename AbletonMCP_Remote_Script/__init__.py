@@ -1,18 +1,11 @@
 # AbletonMCP/init.py
-from __future__ import absolute_import, print_function, unicode_literals
-
 from _Framework.ControlSurface import ControlSurface
 import socket
 import json
 import threading
 import time
 import traceback
-
-# Change queue import for Python 2
-try:
-    import Queue as queue  # Python 2
-except ImportError:
-    import queue  # Python 3
+import queue
 
 # Constants for socket communication
 DEFAULT_PORT = 9877
@@ -220,16 +213,30 @@ class AbletonMCP(ControlSurface):
         
         try:
             # Route the command to the appropriate handler
-            if command_type == "get_session_info":
+            if command_type == "health_check":
+                response["result"] = self._health_check()
+            elif command_type == "get_session_info":
                 response["result"] = self._get_session_info()
+            elif command_type == "get_playback_position":
+                response["result"] = self._get_playback_position()
             elif command_type == "get_track_info":
                 track_index = params.get("track_index", 0)
                 response["result"] = self._get_track_info(track_index)
+            elif command_type == "get_clip_notes":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_clip_notes(track_index, clip_index)
+            elif command_type == "get_device_parameters":
+                track_index = params.get("track_index", 0)
+                device_index = params.get("device_index", 0)
+                response["result"] = self._get_device_parameters(track_index, device_index)
             # Commands that modify Live's state should be scheduled on the main thread
-            elif command_type in ["create_midi_track", "set_track_name", 
-                                 "create_clip", "add_notes_to_clip", "set_clip_name", 
+            elif command_type in ["create_midi_track", "create_audio_track", "set_track_name",
+                                 "set_track_mute", "set_track_solo", "set_track_arm",
+                                 "create_clip", "delete_clip", "add_notes_to_clip", "set_clip_name",
                                  "set_tempo", "fire_clip", "stop_clip",
-                                 "start_playback", "stop_playback", "load_browser_item"]:
+                                 "start_playback", "stop_playback", "load_browser_item",
+                                 "set_device_parameter"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -240,15 +247,34 @@ class AbletonMCP(ControlSurface):
                         if command_type == "create_midi_track":
                             index = params.get("index", -1)
                             result = self._create_midi_track(index)
+                        elif command_type == "create_audio_track":
+                            index = params.get("index", -1)
+                            result = self._create_audio_track(index)
                         elif command_type == "set_track_name":
                             track_index = params.get("track_index", 0)
                             name = params.get("name", "")
                             result = self._set_track_name(track_index, name)
+                        elif command_type == "set_track_mute":
+                            track_index = params.get("track_index", 0)
+                            mute = params.get("mute", False)
+                            result = self._set_track_mute(track_index, mute)
+                        elif command_type == "set_track_solo":
+                            track_index = params.get("track_index", 0)
+                            solo = params.get("solo", False)
+                            result = self._set_track_solo(track_index, solo)
+                        elif command_type == "set_track_arm":
+                            track_index = params.get("track_index", 0)
+                            arm = params.get("arm", False)
+                            result = self._set_track_arm(track_index, arm)
                         elif command_type == "create_clip":
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
                             length = params.get("length", 4.0)
                             result = self._create_clip(track_index, clip_index, length)
+                        elif command_type == "delete_clip":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._delete_clip(track_index, clip_index)
                         elif command_type == "add_notes_to_clip":
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
@@ -282,6 +308,12 @@ class AbletonMCP(ControlSurface):
                             track_index = params.get("track_index", 0)
                             item_uri = params.get("item_uri", "")
                             result = self._load_browser_item(track_index, item_uri)
+                        elif command_type == "set_device_parameter":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            parameter_index = params.get("parameter_index", 0)
+                            value = params.get("value", 0.0)
+                            result = self._set_device_parameter(track_index, device_index, parameter_index, value)
                         
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
@@ -432,8 +464,272 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error creating MIDI track: " + str(e))
             raise
-    
-    
+
+    def _create_audio_track(self, index):
+        """Create a new audio track at the specified index"""
+        try:
+            self._song.create_audio_track(index)
+            new_track_index = len(self._song.tracks) - 1 if index == -1 else index
+            new_track = self._song.tracks[new_track_index]
+
+            result = {
+                "index": new_track_index,
+                "name": new_track.name
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error creating audio track: " + str(e))
+            raise
+
+    def _health_check(self):
+        """Check if Ableton is responsive"""
+        try:
+            result = {
+                "status": "ok",
+                "tempo": self._song.tempo,
+                "is_playing": self._song.is_playing,
+                "track_count": len(self._song.tracks)
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error in health check: " + str(e))
+            raise
+
+    def _get_playback_position(self):
+        """Get the current playback position"""
+        try:
+            result = {
+                "current_song_time": self._song.current_song_time,
+                "is_playing": self._song.is_playing,
+                "tempo": self._song.tempo,
+                "signature_numerator": self._song.signature_numerator,
+                "signature_denominator": self._song.signature_denominator
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting playback position: " + str(e))
+            raise
+
+    def _set_track_mute(self, track_index, mute):
+        """Set the mute state of a track"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+            track.mute = mute
+
+            result = {
+                "track_index": track_index,
+                "mute": track.mute
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error setting track mute: " + str(e))
+            raise
+
+    def _set_track_solo(self, track_index, solo):
+        """Set the solo state of a track"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+            track.solo = solo
+
+            result = {
+                "track_index": track_index,
+                "solo": track.solo
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error setting track solo: " + str(e))
+            raise
+
+    def _set_track_arm(self, track_index, arm):
+        """Set the arm (record enable) state of a track"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+            if track.can_be_armed:
+                track.arm = arm
+                result = {
+                    "track_index": track_index,
+                    "arm": track.arm
+                }
+            else:
+                result = {
+                    "track_index": track_index,
+                    "arm": False,
+                    "error": "Track cannot be armed"
+                }
+            return result
+        except Exception as e:
+            self.log_message("Error setting track arm: " + str(e))
+            raise
+
+    def _get_clip_notes(self, track_index, clip_index):
+        """Get all notes from a clip"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+
+            clip_slot = track.clip_slots[clip_index]
+
+            if not clip_slot.has_clip:
+                raise Exception("No clip in slot")
+
+            clip = clip_slot.clip
+
+            if not clip.is_midi_clip:
+                raise Exception("Clip is not a MIDI clip")
+
+            # Get all notes from the clip
+            # select_all_notes selects all notes, get_selected_notes returns them
+            clip.select_all_notes()
+            notes_data = clip.get_selected_notes()
+            clip.deselect_all_notes()
+
+            notes = []
+            for note in notes_data:
+                notes.append({
+                    "pitch": note[0],
+                    "start_time": note[1],
+                    "duration": note[2],
+                    "velocity": note[3],
+                    "mute": note[4]
+                })
+
+            result = {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "clip_name": clip.name,
+                "length": clip.length,
+                "note_count": len(notes),
+                "notes": notes
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting clip notes: " + str(e))
+            raise
+
+    def _delete_clip(self, track_index, clip_index):
+        """Delete a clip from a clip slot"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+
+            clip_slot = track.clip_slots[clip_index]
+
+            if not clip_slot.has_clip:
+                raise Exception("No clip in slot")
+
+            clip_name = clip_slot.clip.name
+            clip_slot.delete_clip()
+
+            result = {
+                "deleted": True,
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "clip_name": clip_name
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error deleting clip: " + str(e))
+            raise
+
+    def _get_device_parameters(self, track_index, device_index):
+        """Get all parameters from a device"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index out of range")
+
+            device = track.devices[device_index]
+
+            parameters = []
+            for i, param in enumerate(device.parameters):
+                param_info = {
+                    "index": i,
+                    "name": param.name,
+                    "value": param.value,
+                    "min": param.min,
+                    "max": param.max,
+                    "is_enabled": param.is_enabled,
+                    "is_quantized": param.is_quantized
+                }
+                if param.is_quantized:
+                    param_info["value_items"] = list(param.value_items) if hasattr(param, 'value_items') else []
+                parameters.append(param_info)
+
+            result = {
+                "track_index": track_index,
+                "device_index": device_index,
+                "device_name": device.name,
+                "device_class": device.class_name,
+                "parameter_count": len(parameters),
+                "parameters": parameters
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error getting device parameters: " + str(e))
+            raise
+
+    def _set_device_parameter(self, track_index, device_index, parameter_index, value):
+        """Set a device parameter value"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index out of range")
+
+            device = track.devices[device_index]
+
+            if parameter_index < 0 or parameter_index >= len(device.parameters):
+                raise IndexError("Parameter index out of range")
+
+            param = device.parameters[parameter_index]
+
+            if not param.is_enabled:
+                raise Exception("Parameter is not enabled")
+
+            # Clamp value to valid range
+            clamped_value = max(param.min, min(param.max, value))
+            param.value = clamped_value
+
+            result = {
+                "track_index": track_index,
+                "device_index": device_index,
+                "parameter_index": parameter_index,
+                "parameter_name": param.name,
+                "value": param.value,
+                "min": param.min,
+                "max": param.max
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error setting device parameter: " + str(e))
+            raise
+
     def _set_track_name(self, track_index, name):
         """Set the name of a track"""
         try:
