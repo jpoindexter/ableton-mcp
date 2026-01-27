@@ -22,6 +22,7 @@ import logging
 import uvicorn
 import threading
 import os
+import secrets
 
 # Configure logging
 logging.basicConfig(level=logging.INFO,
@@ -192,7 +193,7 @@ class AbletonConnection:
                         continue
                     raise HTTPException(
                         status_code=503,
-                        detail=f"Could not connect to Ableton at {self.host}:{self.port}. Make sure Live is running with the AbletonMCP control surface enabled."
+                        detail="Could not connect to Ableton. Make sure Live is running with the AbletonMCP control surface enabled."
                     )
 
                 command = {"type": command_type, "params": params or {}}
@@ -337,7 +338,8 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
                     status_code=401,
                     content={"error": "API key required. Set X-API-Key header."}
                 )
-            if api_key != REST_API_KEY:
+            # Use timing-safe comparison to prevent timing attacks
+            if not secrets.compare_digest(api_key, REST_API_KEY):
                 return JSONResponse(
                     status_code=403,
                     content={"error": "Invalid API key"}
@@ -464,18 +466,18 @@ class TempoRequest(BaseModel):
         return v
 
 class TrackRequest(BaseModel):
-    track_index: int
+    track_index: int = Field(..., ge=0, le=MAX_TRACK_INDEX)
 
 class TrackCreateRequest(BaseModel):
-    index: Optional[int] = -1
-    name: Optional[str] = None
+    index: Optional[int] = Field(-1, ge=-1, le=MAX_TRACK_INDEX)
+    name: Optional[str] = Field(None, max_length=256)
 
 class TrackNameRequest(BaseModel):
-    track_index: int
-    name: str
+    track_index: int = Field(..., ge=0, le=MAX_TRACK_INDEX)
+    name: str = Field(..., max_length=256)
 
 class TrackBoolRequest(BaseModel):
-    track_index: int
+    track_index: int = Field(..., ge=0, le=MAX_TRACK_INDEX)
     value: bool
 
 class TrackVolumeRequest(BaseModel):
@@ -499,126 +501,98 @@ class TrackPanRequest(BaseModel):
         return v
 
 class TrackColorRequest(BaseModel):
-    track_index: int
-    color: int
+    track_index: int = Field(..., ge=0, le=MAX_TRACK_INDEX)
+    color: int = Field(..., ge=0, le=69)  # Ableton has 70 color indices (0-69)
 
 class ClipRequest(BaseModel):
-    track_index: int
-    clip_index: int
+    track_index: int = Field(..., ge=0, le=MAX_TRACK_INDEX)
+    clip_index: int = Field(..., ge=0, le=MAX_CLIP_INDEX)
 
 class ClipCreateRequest(BaseModel):
-    track_index: int
-    clip_index: int
-    length: Optional[float] = 4.0
-    name: Optional[str] = None
+    track_index: int = Field(..., ge=0, le=MAX_TRACK_INDEX)
+    clip_index: int = Field(..., ge=0, le=MAX_CLIP_INDEX)
+    length: Optional[float] = Field(4.0, gt=0, le=1024)  # Max 1024 beats
+    name: Optional[str] = Field(None, max_length=256)
 
 class ClipNameRequest(BaseModel):
-    track_index: int
-    clip_index: int
-    name: str
+    track_index: int = Field(..., ge=0, le=MAX_TRACK_INDEX)
+    clip_index: int = Field(..., ge=0, le=MAX_CLIP_INDEX)
+    name: str = Field(..., max_length=256)
 
 class ClipColorRequest(BaseModel):
-    track_index: int
-    clip_index: int
-    color: int
+    track_index: int = Field(..., ge=0, le=MAX_TRACK_INDEX)
+    clip_index: int = Field(..., ge=0, le=MAX_CLIP_INDEX)
+    color: int = Field(..., ge=0, le=69)  # Ableton has 70 color indices (0-69)
 
 class ClipLoopRequest(BaseModel):
-    track_index: int
-    clip_index: int
-    loop_start: Optional[float] = None
-    loop_end: Optional[float] = None
+    track_index: int = Field(..., ge=0, le=MAX_TRACK_INDEX)
+    clip_index: int = Field(..., ge=0, le=MAX_CLIP_INDEX)
+    loop_start: Optional[float] = Field(None, ge=0, le=100000)
+    loop_end: Optional[float] = Field(None, ge=0, le=100000)
     looping: Optional[bool] = None
 
 class ClipDuplicateRequest(BaseModel):
-    track_index: int
-    clip_index: int
-    target_index: int
+    track_index: int = Field(..., ge=0, le=MAX_TRACK_INDEX)
+    clip_index: int = Field(..., ge=0, le=MAX_CLIP_INDEX)
+    target_index: int = Field(..., ge=0, le=MAX_CLIP_INDEX)
 
 class Note(BaseModel):
-    pitch: int
-    start_time: float
-    duration: float
-    velocity: Optional[int] = 100
-
-    @field_validator('pitch')
-    @classmethod
-    def validate_pitch(cls, v):
-        if not 0 <= v <= 127:
-            raise ValueError('Pitch must be between 0 and 127')
-        return v
-
-    @field_validator('velocity')
-    @classmethod
-    def validate_velocity(cls, v):
-        if v is not None and not 0 <= v <= 127:
-            raise ValueError('Velocity must be between 0 and 127')
-        return v
-
-    @field_validator('duration')
-    @classmethod
-    def validate_duration(cls, v):
-        if v <= 0:
-            raise ValueError('Duration must be positive')
-        return v
-
-    @field_validator('start_time')
-    @classmethod
-    def validate_start_time(cls, v):
-        if v < 0:
-            raise ValueError('Start time must be non-negative')
-        return v
+    pitch: int = Field(..., ge=0, le=127)
+    start_time: float = Field(..., ge=0, le=100000)
+    duration: float = Field(..., gt=0, le=1024)
+    velocity: Optional[int] = Field(100, ge=0, le=127)
 
 class AddNotesRequest(BaseModel):
-    track_index: int
-    clip_index: int
-    notes: List[Note]
+    track_index: int = Field(..., ge=0, le=MAX_TRACK_INDEX)
+    clip_index: int = Field(..., ge=0, le=MAX_CLIP_INDEX)
+    notes: List[Note] = Field(..., max_length=10000)  # Limit notes per request
 
 class RemoveNotesRequest(BaseModel):
-    track_index: int
-    clip_index: int
-    pitch: Optional[int] = -1
-    start_time: float
-    end_time: float
+    track_index: int = Field(..., ge=0, le=MAX_TRACK_INDEX)
+    clip_index: int = Field(..., ge=0, le=MAX_CLIP_INDEX)
+    pitch: Optional[int] = Field(-1, ge=-1, le=127)
+    start_time: float = Field(..., ge=0, le=100000)
+    end_time: float = Field(..., ge=0, le=100000)
 
 class TransposeRequest(BaseModel):
-    track_index: int
-    clip_index: int
-    semitones: int
+    track_index: int = Field(..., ge=0, le=MAX_TRACK_INDEX)
+    clip_index: int = Field(..., ge=0, le=MAX_CLIP_INDEX)
+    semitones: int = Field(..., ge=-127, le=127)
 
 class SceneRequest(BaseModel):
-    scene_index: int
+    scene_index: int = Field(..., ge=0, le=MAX_SCENE_INDEX)
 
 class SceneCreateRequest(BaseModel):
-    index: Optional[int] = -1
-    name: Optional[str] = None
+    index: Optional[int] = Field(-1, ge=-1, le=MAX_SCENE_INDEX)
+    name: Optional[str] = Field(None, max_length=256)
 
 class SceneNameRequest(BaseModel):
-    scene_index: int
-    name: str
+    scene_index: int = Field(..., ge=0, le=MAX_SCENE_INDEX)
+    name: str = Field(..., max_length=256)
 
 class DeviceRequest(BaseModel):
-    track_index: int
-    device_index: int
+    track_index: int = Field(..., ge=0, le=MAX_TRACK_INDEX)
+    device_index: int = Field(..., ge=0, le=MAX_DEVICE_INDEX)
 
 class DeviceToggleRequest(BaseModel):
-    track_index: int
-    device_index: int
+    track_index: int = Field(..., ge=0, le=MAX_TRACK_INDEX)
+    device_index: int = Field(..., ge=0, le=MAX_DEVICE_INDEX)
     enabled: Optional[bool] = None
 
 class DeviceParamRequest(BaseModel):
-    track_index: int
-    device_index: int
-    parameter_index: int
-    value: float
+    track_index: int = Field(..., ge=0, le=MAX_TRACK_INDEX)
+    device_index: int = Field(..., ge=0, le=MAX_DEVICE_INDEX)
+    parameter_index: int = Field(..., ge=0, le=MAX_PARAMETER_INDEX)
+    value: float = Field(..., ge=0, le=1)  # Normalized parameter value
 
 class SendLevelRequest(BaseModel):
-    track_index: int
-    send_index: int
-    level: float
+    track_index: int = Field(..., ge=0, le=MAX_TRACK_INDEX)
+    send_index: int = Field(..., ge=0, le=MAX_SEND_INDEX)
+    level: float = Field(..., ge=0, le=1)  # Normalized level
 
 class ReturnVolumeRequest(BaseModel):
-    return_index: int
-    volume: float
+    return_index: int = Field(..., ge=0, le=MAX_SEND_INDEX)
+    volume: float = Field(..., ge=0, le=1)  # Normalized volume
 
 class ReturnPanRequest(BaseModel):
     return_index: int
@@ -806,6 +780,39 @@ def set_track_volume(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX), req
 def set_track_pan(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX), req: TrackPanRequest = None):
     return ableton.send_command("set_track_pan", {"track_index": track_index, "pan": req.pan})
 
+# Track Monitoring
+class MonitoringRequest(BaseModel):
+    monitoring: int = Field(..., ge=0, le=2, description="Monitoring state (0=In, 1=Auto, 2=Off)")
+
+@app.get("/api/tracks/{track_index}/monitoring")
+def get_track_monitoring(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX)):
+    """Get track monitoring state"""
+    return ableton.send_command("get_track_monitoring", {"track_index": track_index})
+
+@app.put("/api/tracks/{track_index}/monitoring")
+def set_track_monitoring(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX), req: MonitoringRequest = None):
+    """Set track monitoring state (0=In, 1=Auto, 2=Off)"""
+    return ableton.send_command("set_track_monitoring", {"track_index": track_index, "monitoring": req.monitoring})
+
+# Group Tracks
+class GroupTrackRequest(BaseModel):
+    track_indices: List[int] = Field(..., min_length=1, description="List of track indices to group")
+
+@app.post("/api/tracks/group")
+def create_group_track(req: GroupTrackRequest):
+    """Create a group track containing the specified tracks"""
+    return ableton.send_command("create_group_track", {"track_indices": req.track_indices})
+
+@app.post("/api/tracks/{track_index}/fold")
+def fold_track(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX)):
+    """Fold/collapse a group track"""
+    return ableton.send_command("fold_track", {"track_index": track_index})
+
+@app.post("/api/tracks/{track_index}/unfold")
+def unfold_track(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX)):
+    """Unfold/expand a group track"""
+    return ableton.send_command("unfold_track", {"track_index": track_index})
+
 # Clips
 @app.get("/api/tracks/{track_index}/clips/{clip_index}")
 def get_clip_info(
@@ -980,8 +987,8 @@ def get_warp_markers(
     })
 
 class WarpMarkerRequest(BaseModel):
-    beat_time: float
-    sample_time: Optional[float] = None
+    beat_time: float = Field(..., ge=0, le=100000)
+    sample_time: Optional[float] = Field(None, ge=0, le=1000000000)
 
 @app.post("/api/tracks/{track_index}/clips/{clip_index}/warp-markers")
 def add_warp_marker(
@@ -999,7 +1006,7 @@ def add_warp_marker(
     return ableton.send_command("add_warp_marker", params)
 
 class DeleteWarpMarkerRequest(BaseModel):
-    beat_time: float
+    beat_time: float = Field(..., ge=0, le=100000)
 
 @app.delete("/api/tracks/{track_index}/clips/{clip_index}/warp-markers")
 def delete_warp_marker(
@@ -1025,7 +1032,7 @@ def get_clip_gain(
     })
 
 class ClipGainRequest(BaseModel):
-    gain: float = Field(..., description="Gain in dB")
+    gain: float = Field(..., ge=-70, le=24, description="Gain in dB")
 
 @app.put("/api/tracks/{track_index}/clips/{clip_index}/gain")
 def set_clip_gain(
@@ -1064,6 +1071,79 @@ def set_clip_pitch(
         "pitch": req.pitch
     })
 
+# Clip Automation
+class AutomationRequest(BaseModel):
+    points: List[Dict[str, float]] = Field(..., max_length=10000, description="List of automation points with 'time' and 'value' keys")
+
+@app.get("/api/tracks/{track_index}/clips/{clip_index}/automation/{parameter_name}")
+def get_clip_automation(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    parameter_name: str = Path(...)
+):
+    """Get automation envelope for a parameter in a clip"""
+    return ableton.send_command("get_clip_automation", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "parameter_name": parameter_name
+    })
+
+@app.put("/api/tracks/{track_index}/clips/{clip_index}/automation/{parameter_name}")
+def set_clip_automation(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    parameter_name: str = Path(...),
+    req: AutomationRequest = None
+):
+    """Set automation envelope for a parameter in a clip"""
+    return ableton.send_command("set_clip_automation", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "parameter_name": parameter_name,
+        "points": req.points
+    })
+
+@app.delete("/api/tracks/{track_index}/clips/{clip_index}/automation/{parameter_name}")
+def clear_clip_automation(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    parameter_name: str = Path(...)
+):
+    """Clear automation envelope for a parameter in a clip"""
+    return ableton.send_command("clear_clip_automation", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "parameter_name": parameter_name
+    })
+
+# Warp Mode
+class WarpModeRequest(BaseModel):
+    warp_mode: int = Field(..., ge=0, le=6, description="Warp mode (0=Beats, 1=Tones, 2=Texture, 3=Re-Pitch, 4=Complex, 5=Rex, 6=Complex Pro)")
+
+@app.get("/api/tracks/{track_index}/clips/{clip_index}/warp")
+def get_clip_warp_info(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX)
+):
+    """Get warp information for an audio clip"""
+    return ableton.send_command("get_clip_warp_info", {
+        "track_index": track_index,
+        "clip_index": clip_index
+    })
+
+@app.put("/api/tracks/{track_index}/clips/{clip_index}/warp")
+def set_clip_warp_mode(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    req: WarpModeRequest = None
+):
+    """Set warp mode for an audio clip"""
+    return ableton.send_command("set_clip_warp_mode", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "warp_mode": req.warp_mode
+    })
+
 # Scenes
 @app.get("/api/scenes")
 def get_all_scenes():
@@ -1094,7 +1174,7 @@ def set_scene_name(scene_index: int = Path(..., ge=0, le=MAX_SCENE_INDEX), req: 
     return ableton.send_command("set_scene_name", {"scene_index": scene_index, "name": req.name})
 
 class SceneColorRequest(BaseModel):
-    color: int
+    color: int = Field(..., ge=0, le=69)  # Ableton has 70 color indices (0-69)
 
 @app.get("/api/scenes/{scene_index}/color")
 def get_scene_color(scene_index: int = Path(..., ge=0, le=MAX_SCENE_INDEX)):
@@ -1148,6 +1228,36 @@ def delete_device(
 ):
     return ableton.send_command("delete_device", {"track_index": track_index, "device_index": device_index})
 
+@app.get("/api/tracks/{track_index}/devices/by-name/{device_name}")
+def get_device_by_name(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    device_name: str = Path(...)
+):
+    """Get a device by its name on a track"""
+    return ableton.send_command("get_device_by_name", {"track_index": track_index, "device_name": device_name})
+
+# Rack Chains
+@app.get("/api/tracks/{track_index}/devices/{device_index}/chains")
+def get_rack_chains(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    device_index: int = Path(..., ge=0, le=MAX_DEVICE_INDEX)
+):
+    """Get chains in a rack device"""
+    return ableton.send_command("get_rack_chains", {"track_index": track_index, "device_index": device_index})
+
+@app.post("/api/tracks/{track_index}/devices/{device_index}/chains/{chain_index}/select")
+def select_rack_chain(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    device_index: int = Path(..., ge=0, le=MAX_DEVICE_INDEX),
+    chain_index: int = Path(..., ge=0)
+):
+    """Select a chain in a rack device"""
+    return ableton.send_command("select_rack_chain", {
+        "track_index": track_index,
+        "device_index": device_index,
+        "chain_index": chain_index
+    })
+
 # Return Tracks
 @app.get("/api/returns")
 def get_return_tracks():
@@ -1178,6 +1288,16 @@ def set_send_level(
 @app.put("/api/returns/{return_index}/volume")
 def set_return_volume(return_index: int = Path(..., ge=0, le=MAX_SEND_INDEX), req: ReturnVolumeRequest = None):
     return ableton.send_command("set_return_volume", {"return_index": return_index, "volume": req.volume})
+
+@app.put("/api/returns/{return_index}/pan")
+def set_return_pan(return_index: int = Path(..., ge=0, le=MAX_SEND_INDEX), req: ReturnPanRequest = None):
+    """Set return track pan (-1.0 to 1.0)"""
+    return ableton.send_command("set_return_pan", {"return_index": return_index, "pan": req.pan})
+
+@app.get("/api/returns/{return_index}")
+def get_return_track_info(return_index: int = Path(..., ge=0, le=MAX_SEND_INDEX)):
+    """Get detailed information about a specific return track"""
+    return ableton.send_command("get_return_track_info", {"return_index": return_index})
 
 # Recording
 @app.post("/api/recording/start")
@@ -1269,6 +1389,42 @@ def generate_bassline(req: BasslineRequest):
     })
 
 # ============================================================================
+# Groove Pool
+# ============================================================================
+
+class ApplyGrooveRequest(BaseModel):
+    groove_index: int = Field(..., ge=0, description="Index of the groove in the pool")
+
+@app.get("/api/grooves")
+def get_groove_pool():
+    """Get all grooves in the groove pool"""
+    return ableton.send_command("get_groove_pool")
+
+@app.post("/api/tracks/{track_index}/clips/{clip_index}/groove")
+def apply_groove(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX),
+    req: ApplyGrooveRequest = None
+):
+    """Apply a groove from the groove pool to a clip"""
+    return ableton.send_command("apply_groove", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "groove_index": req.groove_index
+    })
+
+@app.post("/api/tracks/{track_index}/clips/{clip_index}/groove/commit")
+def commit_groove(
+    track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
+    clip_index: int = Path(..., ge=0, le=MAX_CLIP_INDEX)
+):
+    """Commit/bake the groove into the clip"""
+    return ableton.send_command("commit_groove", {
+        "track_index": track_index,
+        "clip_index": clip_index
+    })
+
+# ============================================================================
 # Master Track Control
 # ============================================================================
 
@@ -1297,12 +1453,12 @@ def get_master_info():
     """Get master track information including volume, pan, and devices"""
     return ableton.send_command("get_master_info")
 
-@app.post("/api/master/volume")
+@app.put("/api/master/volume")
 def set_master_volume(req: MasterVolumeRequest):
     """Set master track volume (0.0 to 1.0)"""
     return ableton.send_command("set_master_volume", {"volume": req.volume})
 
-@app.post("/api/master/pan")
+@app.put("/api/master/pan")
 def set_master_pan(req: MasterPanRequest):
     """Set master track pan (-1.0 to 1.0)"""
     return ableton.send_command("set_master_pan", {"pan": req.pan})
@@ -1312,22 +1468,22 @@ def set_master_pan(req: MasterPanRequest):
 # ============================================================================
 
 class BrowsePathRequest(BaseModel):
-    path: List[str]  # e.g. ["Audio Effects", "EQ Eight"]
+    path: List[str] = Field(..., max_length=20)  # e.g. ["Audio Effects", "EQ Eight"]
 
 class BrowserSearchRequest(BaseModel):
-    query: str
-    category: str = "all"  # all, instruments, sounds, drums, audio_effects, midi_effects
+    query: str = Field(..., max_length=256)
+    category: str = Field("all", max_length=32)  # all, instruments, sounds, drums, audio_effects, midi_effects
 
 class BrowserChildrenRequest(BaseModel):
-    uri: str
+    uri: str = Field(..., max_length=2048)
 
 class LoadItemToTrackRequest(BaseModel):
-    track_index: int
-    uri: str
+    track_index: int = Field(..., ge=0, le=MAX_TRACK_INDEX)
+    uri: str = Field(..., max_length=2048)
 
 class LoadItemToReturnRequest(BaseModel):
-    return_index: int
-    uri: str
+    return_index: int = Field(..., ge=0, le=MAX_SEND_INDEX)
+    uri: str = Field(..., max_length=2048)
 
 @app.post("/api/browser/browse")
 def browse_path(req: BrowsePathRequest):
@@ -1363,9 +1519,25 @@ def load_item_to_return(req: LoadItemToReturnRequest):
         "item_uri": req.uri
     })
 
+@app.get("/api/browser/tree")
+def get_browser_tree():
+    """Get the root-level browser tree structure"""
+    return ableton.send_command("get_browser_tree")
+
+class BrowserPathRequest(BaseModel):
+    path: str = Field(..., max_length=1024, description="Browser path like 'Sounds/Drums' or 'Audio Effects/EQ'")
+
+@app.get("/api/browser/items")
+def get_browser_items_at_path(path: str = Query(..., max_length=1024, description="Browser path like 'Sounds/Drums' or 'Audio Effects/EQ'")):
+    """Get browser items at a specific path"""
+    return ableton.send_command("get_browser_items_at_path", {"path": path})
+
 # ============================================================================
 # View & Selection
 # ============================================================================
+
+# Valid view names for focus_view
+VALID_VIEW_NAMES = {"Session", "Arranger", "Detail", "Detail/Clip", "Detail/DeviceChain", "Browser"}
 
 @app.get("/api/view")
 def get_current_view():
@@ -1373,8 +1545,13 @@ def get_current_view():
     return ableton.send_command("get_current_view")
 
 @app.post("/api/view/focus")
-def focus_view(view_name: str):
+def focus_view(view_name: str = Query(...)):
     """Focus a specific view (Session, Arranger, Detail, etc.)"""
+    if view_name not in VALID_VIEW_NAMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid view_name. Must be one of: {sorted(VALID_VIEW_NAMES)}"
+        )
     return ableton.send_command("focus_view", {"view_name": view_name})
 
 @app.post("/api/tracks/{track_index}/select")
@@ -1512,9 +1689,236 @@ def get_playback_position():
 # Generic Command Endpoint (for Ollama function calling)
 # ============================================================================
 
+# Parameter validation schemas for generic command endpoint
+COMMAND_PARAM_SCHEMAS = {
+    # Transport commands (no params or simple params)
+    "health_check": {},
+    "start_playback": {},
+    "stop_playback": {},
+    "get_playback_position": {},
+    "get_session_info": {},
+    "undo": {},
+    "redo": {},
+    "set_tempo": {"tempo": {"type": float, "min": 20, "max": 300}},
+    # Track commands
+    "create_midi_track": {"index": {"type": int, "min": -1, "max": MAX_TRACK_INDEX, "optional": True}, "name": {"type": str, "max_length": 256, "optional": True}},
+    "create_audio_track": {"index": {"type": int, "min": -1, "max": MAX_TRACK_INDEX, "optional": True}, "name": {"type": str, "max_length": 256, "optional": True}},
+    "delete_track": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}},
+    "duplicate_track": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}},
+    "freeze_track": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}},
+    "flatten_track": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}},
+    "get_track_info": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}},
+    "get_track_color": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}},
+    "set_track_name": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "name": {"type": str, "max_length": 256}},
+    "set_track_mute": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "mute": {"type": bool}},
+    "set_track_solo": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "solo": {"type": bool}},
+    "set_track_arm": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "arm": {"type": bool}},
+    "set_track_volume": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "volume": {"type": float, "min": 0, "max": 1}},
+    "set_track_pan": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "pan": {"type": float, "min": -1, "max": 1}},
+    "set_track_color": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "color": {"type": int, "min": 0, "max": 69}},
+    "select_track": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}},
+    # Clip commands
+    "create_clip": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "length": {"type": float, "min": 0.01, "max": 1024, "optional": True}, "name": {"type": str, "max_length": 256, "optional": True}},
+    "delete_clip": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}},
+    "fire_clip": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}},
+    "stop_clip": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}},
+    "duplicate_clip": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "target_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}},
+    "get_clip_info": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}},
+    "get_clip_notes": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}},
+    "get_clip_color": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}},
+    "get_clip_loop": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}},
+    "set_clip_name": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "name": {"type": str, "max_length": 256}},
+    "set_clip_color": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "color": {"type": int, "min": 0, "max": 69}},
+    "set_clip_loop": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "loop_start": {"type": float, "min": 0, "max": 100000, "optional": True}, "loop_end": {"type": float, "min": 0, "max": 100000, "optional": True}, "looping": {"type": bool, "optional": True}},
+    "select_clip": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}},
+    # Note commands
+    "add_notes_to_clip": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "notes": {"type": list, "max_length": 10000}},
+    "remove_notes": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "pitch": {"type": int, "min": -1, "max": 127, "optional": True}, "start_time": {"type": float, "min": 0, "max": 100000}, "end_time": {"type": float, "min": 0, "max": 100000}},
+    "remove_all_notes": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}},
+    "transpose_notes": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "semitones": {"type": int, "min": -127, "max": 127}},
+    # Scene commands
+    "get_all_scenes": {},
+    "create_scene": {"index": {"type": int, "min": -1, "max": MAX_SCENE_INDEX, "optional": True}, "name": {"type": str, "max_length": 256, "optional": True}},
+    "delete_scene": {"scene_index": {"type": int, "min": 0, "max": MAX_SCENE_INDEX}},
+    "fire_scene": {"scene_index": {"type": int, "min": 0, "max": MAX_SCENE_INDEX}},
+    "stop_scene": {"scene_index": {"type": int, "min": 0, "max": MAX_SCENE_INDEX}},
+    "duplicate_scene": {"scene_index": {"type": int, "min": 0, "max": MAX_SCENE_INDEX}},
+    "set_scene_name": {"scene_index": {"type": int, "min": 0, "max": MAX_SCENE_INDEX}, "name": {"type": str, "max_length": 256}},
+    "get_scene_color": {"scene_index": {"type": int, "min": 0, "max": MAX_SCENE_INDEX}},
+    "set_scene_color": {"scene_index": {"type": int, "min": 0, "max": MAX_SCENE_INDEX}, "color": {"type": int, "min": 0, "max": 69}},
+    "select_scene": {"scene_index": {"type": int, "min": 0, "max": MAX_SCENE_INDEX}},
+    # Device commands
+    "get_device_parameters": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "device_index": {"type": int, "min": 0, "max": MAX_DEVICE_INDEX}},
+    "set_device_parameter": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "device_index": {"type": int, "min": 0, "max": MAX_DEVICE_INDEX}, "parameter_index": {"type": int, "min": 0, "max": MAX_PARAMETER_INDEX}, "value": {"type": float, "min": 0, "max": 1}},
+    "toggle_device": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "device_index": {"type": int, "min": 0, "max": MAX_DEVICE_INDEX}, "enabled": {"type": bool, "optional": True}},
+    "delete_device": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "device_index": {"type": int, "min": 0, "max": MAX_DEVICE_INDEX}},
+    # View commands
+    "get_current_view": {},
+    "focus_view": {"view_name": {"type": str, "allowed_values": VALID_VIEW_NAMES}},
+    # Additional commands with minimal validation
+    "get_track_input_routing": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}},
+    "get_track_output_routing": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}},
+    "set_track_input_routing": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "routing_type": {"type": str, "max_length": 64}, "routing_channel": {"type": str, "max_length": 64, "optional": True}},
+    "set_track_output_routing": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "routing_type": {"type": str, "max_length": 64}, "routing_channel": {"type": str, "max_length": 64, "optional": True}},
+    "get_available_inputs": {},
+    "get_available_outputs": {},
+    "set_track_monitoring": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "monitoring": {"type": int, "min": 0, "max": 2}},
+    "get_track_monitoring": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}},
+    # Return tracks
+    "get_return_tracks": {},
+    "get_return_track_info": {"return_index": {"type": int, "min": 0, "max": MAX_SEND_INDEX}},
+    "get_send_level": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "send_index": {"type": int, "min": 0, "max": MAX_SEND_INDEX}},
+    "set_send_level": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "send_index": {"type": int, "min": 0, "max": MAX_SEND_INDEX}, "level": {"type": float, "min": 0, "max": 1}},
+    "set_return_volume": {"return_index": {"type": int, "min": 0, "max": MAX_SEND_INDEX}, "volume": {"type": float, "min": 0, "max": 1}},
+    "set_return_pan": {"return_index": {"type": int, "min": 0, "max": MAX_SEND_INDEX}, "pan": {"type": float, "min": -1, "max": 1}},
+    # Master track
+    "get_master_info": {},
+    "set_master_volume": {"volume": {"type": float, "min": 0, "max": 1}},
+    "set_master_pan": {"pan": {"type": float, "min": -1, "max": 1}},
+    # Recording
+    "start_recording": {},
+    "stop_recording": {},
+    "toggle_session_record": {},
+    "toggle_arrangement_record": {},
+    "set_overdub": {"enabled": {"type": bool}},
+    "capture_midi": {},
+    # Arrangement
+    "get_arrangement_length": {},
+    "set_arrangement_loop": {"loop_start": {"type": float, "min": 0, "max": 100000}, "loop_length": {"type": float, "min": 0.01, "max": 100000}, "loop_on": {"type": bool, "optional": True}},
+    "jump_to_time": {"time": {"type": float, "min": 0, "max": 100000}},
+    "get_locators": {},
+    "create_locator": {"time": {"type": float, "min": 0, "max": 100000}, "name": {"type": str, "max_length": 256, "optional": True}},
+    "delete_locator": {"index": {"type": int, "min": 0, "max": 999}},
+    # Session info
+    "get_session_path": {},
+    "is_session_modified": {},
+    "get_cpu_load": {},
+    "get_metronome_state": {},
+    "set_metronome": {"enabled": {"type": bool}},
+    # AI helpers
+    "get_scale_notes": {"root": {"type": int, "min": 0, "max": 127}, "scale_type": {"type": str, "max_length": 32}},
+    "quantize_clip_notes": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "grid": {"type": float, "min": 0.01, "max": 16, "optional": True}, "strength": {"type": float, "min": 0, "max": 1, "optional": True}},
+    "humanize_clip_timing": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "amount": {"type": float, "min": 0, "max": 1}},
+    "humanize_clip_velocity": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "amount": {"type": float, "min": 0, "max": 1}},
+    "generate_drum_pattern": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "style": {"type": str, "max_length": 32, "optional": True}, "length": {"type": float, "min": 0.5, "max": 64, "optional": True}},
+    "generate_bassline": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "root": {"type": int, "min": 0, "max": 127, "optional": True}, "scale_type": {"type": str, "max_length": 32, "optional": True}, "length": {"type": float, "min": 0.5, "max": 64, "optional": True}},
+    # Audio clip editing
+    "get_clip_gain": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}},
+    "get_clip_pitch": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}},
+    "set_clip_gain": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "gain": {"type": float, "min": -70, "max": 24}},
+    "set_clip_pitch": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "pitch": {"type": int, "min": -48, "max": 48}},
+    "set_clip_warp_mode": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "warp_mode": {"type": int, "min": 0, "max": 6}},
+    "get_clip_warp_info": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}},
+    # Warp markers
+    "get_warp_markers": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}},
+    "add_warp_marker": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "beat_time": {"type": float, "min": 0, "max": 100000}, "sample_time": {"type": float, "min": 0, "max": 1000000000, "optional": True}},
+    "delete_warp_marker": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "beat_time": {"type": float, "min": 0, "max": 100000}},
+    # Automation
+    "get_clip_automation": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "parameter_index": {"type": int, "min": 0, "max": MAX_PARAMETER_INDEX, "optional": True}},
+    "set_clip_automation": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "parameter_index": {"type": int, "min": 0, "max": MAX_PARAMETER_INDEX}, "points": {"type": list, "max_length": 10000}},
+    "clear_clip_automation": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "parameter_index": {"type": int, "min": 0, "max": MAX_PARAMETER_INDEX, "optional": True}},
+    # Group tracks
+    "create_group_track": {"track_indices": {"type": list, "max_length": 100}, "name": {"type": str, "max_length": 256, "optional": True}},
+    "ungroup_tracks": {"group_track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}},
+    "fold_track": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}},
+    "unfold_track": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}},
+    # Groove
+    "get_groove_pool": {},
+    "apply_groove": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}, "groove_index": {"type": int, "min": 0, "max": 127}},
+    "commit_groove": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "clip_index": {"type": int, "min": 0, "max": MAX_CLIP_INDEX}},
+    # Browser
+    "browse_path": {"path": {"type": list, "max_length": 20}},
+    "get_browser_children": {"uri": {"type": str, "max_length": 2048}},
+    "search_browser": {"query": {"type": str, "max_length": 256}, "category": {"type": str, "max_length": 32, "optional": True}},
+    "get_browser_tree": {},
+    "get_browser_items_at_path": {"path": {"type": list, "max_length": 20}},
+    "load_browser_item": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "uri": {"type": str, "max_length": 2048}},
+    "load_instrument_or_effect": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "uri": {"type": str, "max_length": 2048}},
+    "load_browser_item_to_return": {"return_index": {"type": int, "min": 0, "max": MAX_SEND_INDEX}, "item_uri": {"type": str, "max_length": 2048}},
+    # Rack chains
+    "get_rack_chains": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "device_index": {"type": int, "min": 0, "max": MAX_DEVICE_INDEX}},
+    "select_rack_chain": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "device_index": {"type": int, "min": 0, "max": MAX_DEVICE_INDEX}, "chain_index": {"type": int, "min": 0, "max": 127}},
+    "get_device_by_name": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "device_name": {"type": str, "max_length": 256}},
+    "load_device_preset": {"track_index": {"type": int, "min": 0, "max": MAX_TRACK_INDEX}, "device_index": {"type": int, "min": 0, "max": MAX_DEVICE_INDEX}, "preset_uri": {"type": str, "max_length": 2048}},
+}
+
+
+def validate_command_params(command: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate and sanitize command parameters based on schema."""
+    if command not in COMMAND_PARAM_SCHEMAS:
+        # Command exists in ALLOWED_COMMANDS but has no schema - allow with basic sanitization
+        return params
+
+    schema = COMMAND_PARAM_SCHEMAS[command]
+    validated = {}
+
+    for param_name, rules in schema.items():
+        is_optional = rules.get("optional", False)
+
+        if param_name not in params:
+            if not is_optional:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Missing required parameter: {param_name}"
+                )
+            continue
+
+        value = params[param_name]
+        expected_type = rules.get("type")
+
+        # Type validation
+        if expected_type == int:
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise HTTPException(status_code=422, detail=f"Parameter {param_name} must be an integer")
+            if "min" in rules and value < rules["min"]:
+                raise HTTPException(status_code=422, detail=f"Parameter {param_name} must be >= {rules['min']}")
+            if "max" in rules and value > rules["max"]:
+                raise HTTPException(status_code=422, detail=f"Parameter {param_name} must be <= {rules['max']}")
+        elif expected_type == float:
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise HTTPException(status_code=422, detail=f"Parameter {param_name} must be a number")
+            value = float(value)
+            if "min" in rules and value < rules["min"]:
+                raise HTTPException(status_code=422, detail=f"Parameter {param_name} must be >= {rules['min']}")
+            if "max" in rules and value > rules["max"]:
+                raise HTTPException(status_code=422, detail=f"Parameter {param_name} must be <= {rules['max']}")
+        elif expected_type == bool:
+            if not isinstance(value, bool):
+                raise HTTPException(status_code=422, detail=f"Parameter {param_name} must be a boolean")
+        elif expected_type == str:
+            if not isinstance(value, str):
+                raise HTTPException(status_code=422, detail=f"Parameter {param_name} must be a string")
+            if "max_length" in rules and len(value) > rules["max_length"]:
+                raise HTTPException(status_code=422, detail=f"Parameter {param_name} exceeds max length of {rules['max_length']}")
+            if "allowed_values" in rules and value not in rules["allowed_values"]:
+                raise HTTPException(status_code=422, detail=f"Parameter {param_name} must be one of: {sorted(rules['allowed_values'])}")
+        elif expected_type == list:
+            if not isinstance(value, list):
+                raise HTTPException(status_code=422, detail=f"Parameter {param_name} must be a list")
+            if "max_length" in rules and len(value) > rules["max_length"]:
+                raise HTTPException(status_code=422, detail=f"Parameter {param_name} exceeds max length of {rules['max_length']}")
+
+        validated[param_name] = value
+
+    # Include any extra params that weren't in schema (for flexibility)
+    for key, value in params.items():
+        if key not in validated:
+            validated[key] = value
+
+    return validated
+
+
 class GenericCommand(BaseModel):
-    command: str
+    command: str = Field(..., max_length=64)
     params: Optional[Dict[str, Any]] = None
+
+    @field_validator('command')
+    @classmethod
+    def validate_command(cls, v):
+        if v not in ALLOWED_COMMANDS:
+            raise ValueError(f'Unknown command: {v}. Use /api/commands to see available commands.')
+        return v
+
 
 @app.post("/api/command")
 def execute_command(cmd: GenericCommand):
@@ -1522,7 +1926,9 @@ def execute_command(cmd: GenericCommand):
     Generic command endpoint for LLM function calling.
     Allows executing any Ableton command by name.
     """
-    return ableton.send_command(cmd.command, cmd.params)
+    # Validate params based on command type
+    validated_params = validate_command_params(cmd.command, cmd.params or {})
+    return ableton.send_command(cmd.command, validated_params)
 
 # ============================================================================
 # Tool Definitions for LLMs

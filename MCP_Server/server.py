@@ -4,6 +4,7 @@ import socket
 import json
 import logging
 import time
+import threading
 from dataclasses import dataclass, field
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, Any, List, Union, Optional
@@ -48,18 +49,19 @@ class AbletonConnection:
         """Receive the complete response, potentially in multiple chunks"""
         chunks = []
         sock.settimeout(15.0)  # Increased timeout for operations that might take longer
-        
+
         try:
             while True:
                 try:
                     chunk = sock.recv(buffer_size)
                     if not chunk:
                         if not chunks:
+                            self.disconnect()  # Cleanup on connection closed
                             raise Exception("Connection closed before receiving any data")
                         break
-                    
+
                     chunks.append(chunk)
-                    
+
                     # Check if we've received a complete JSON object
                     try:
                         data = b''.join(chunks)
@@ -71,14 +73,20 @@ class AbletonConnection:
                         continue
                 except socket.timeout:
                     logger.warning("Socket timeout during chunked receive")
+                    if not chunks:
+                        self.disconnect()  # Cleanup on timeout with no data
                     break
                 except (ConnectionError, BrokenPipeError, ConnectionResetError) as e:
                     logger.error(f"Socket connection error during receive: {str(e)}")
+                    self.disconnect()  # Cleanup on connection error
                     raise
+        except (ConnectionError, BrokenPipeError, ConnectionResetError):
+            raise  # Already handled above
         except Exception as e:
             logger.error(f"Error during receive: {str(e)}")
+            self.disconnect()  # Cleanup on unexpected error
             raise
-            
+
         # If we get here, we either timed out or broke out of the loop
         if chunks:
             data = b''.join(chunks)
@@ -87,8 +95,10 @@ class AbletonConnection:
                 json.loads(data.decode('utf-8'))
                 return data
             except json.JSONDecodeError:
+                self.disconnect()  # Cleanup on incomplete JSON
                 raise Exception("Incomplete JSON response received")
         else:
+            self.disconnect()  # Cleanup when no data received
             raise Exception("No data received")
 
     def send_command(self, command_type: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -209,66 +219,68 @@ mcp = FastMCP(
 
 # Global connection for resources
 _ableton_connection = None
+_connection_lock = threading.Lock()
 
 def get_ableton_connection():
-    """Get or create a persistent Ableton connection"""
+    """Get or create a persistent Ableton connection (thread-safe)"""
     global _ableton_connection
-    
-    if _ableton_connection is not None:
-        try:
-            # Test the connection with a proper health check command
-            # Empty bytes sendall() is unreliable - some implementations ignore it
-            _ableton_connection.sock.settimeout(2.0)
-            _ableton_connection.send_command("health_check")
-            return _ableton_connection
-        except Exception as e:
-            logger.warning(f"Existing connection is no longer valid: {str(e)}")
+
+    with _connection_lock:
+        if _ableton_connection is not None:
             try:
-                _ableton_connection.disconnect()
-            except Exception:
-                pass  # Ignore disconnect errors when connection is already invalid
-            _ableton_connection = None
-    
-    # Connection doesn't exist or is invalid, create a new one
-    if _ableton_connection is None:
-        # Try to connect up to 3 times with a short delay between attempts
-        max_attempts = 3
-        for attempt in range(1, max_attempts + 1):
-            try:
-                logger.info(f"Connecting to Ableton (attempt {attempt}/{max_attempts})...")
-                _ableton_connection = AbletonConnection(host="localhost", port=9877)
-                if _ableton_connection.connect():
-                    logger.info("Created new persistent connection to Ableton")
-                    
-                    # Validate connection with a simple command
-                    try:
-                        # Get session info as a test
-                        _ableton_connection.send_command("get_session_info")
-                        logger.info("Connection validated successfully")
-                        return _ableton_connection
-                    except Exception as e:
-                        logger.error(f"Connection validation failed: {str(e)}")
+                # Test the connection with a proper health check command
+                # Empty bytes sendall() is unreliable - some implementations ignore it
+                _ableton_connection.sock.settimeout(2.0)
+                _ableton_connection.send_command("health_check")
+                return _ableton_connection
+            except Exception as e:
+                logger.warning(f"Existing connection is no longer valid: {str(e)}")
+                try:
+                    _ableton_connection.disconnect()
+                except Exception:
+                    pass  # Ignore disconnect errors when connection is already invalid
+                _ableton_connection = None
+
+        # Connection doesn't exist or is invalid, create a new one
+        if _ableton_connection is None:
+            # Try to connect up to 3 times with a short delay between attempts
+            max_attempts = 3
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    logger.info(f"Connecting to Ableton (attempt {attempt}/{max_attempts})...")
+                    _ableton_connection = AbletonConnection(host="localhost", port=9877)
+                    if _ableton_connection.connect():
+                        logger.info("Created new persistent connection to Ableton")
+
+                        # Validate connection with a simple command
+                        try:
+                            # Get session info as a test
+                            _ableton_connection.send_command("get_session_info")
+                            logger.info("Connection validated successfully")
+                            return _ableton_connection
+                        except Exception as e:
+                            logger.error(f"Connection validation failed: {str(e)}")
+                            _ableton_connection.disconnect()
+                            _ableton_connection = None
+                            # Continue to next attempt
+                    else:
+                        _ableton_connection = None
+                except Exception as e:
+                    logger.error(f"Connection attempt {attempt} failed: {str(e)}")
+                    if _ableton_connection:
                         _ableton_connection.disconnect()
                         _ableton_connection = None
-                        # Continue to next attempt
-                else:
-                    _ableton_connection = None
-            except Exception as e:
-                logger.error(f"Connection attempt {attempt} failed: {str(e)}")
-                if _ableton_connection:
-                    _ableton_connection.disconnect()
-                    _ableton_connection = None
-            
-            # Wait before trying again, but only if we have more attempts left
-            if attempt < max_attempts:
-                time.sleep(1.0)
-        
-        # If we get here, all connection attempts failed
-        if _ableton_connection is None:
-            logger.error("Failed to connect to Ableton after multiple attempts")
-            raise Exception("Could not connect to Ableton. Make sure the Remote Script is running.")
-    
-    return _ableton_connection
+
+                # Wait before trying again, but only if we have more attempts left
+                if attempt < max_attempts:
+                    time.sleep(1.0)
+
+            # If we get here, all connection attempts failed
+            if _ableton_connection is None:
+                logger.error("Failed to connect to Ableton after multiple attempts")
+                raise Exception("Could not connect to Ableton. Make sure the Remote Script is running.")
+
+        return _ableton_connection
 
 
 # Core Tool endpoints
