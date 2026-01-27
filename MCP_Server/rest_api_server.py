@@ -14,7 +14,7 @@ Or: uvicorn rest_api_server:app --host 0.0.0.0 --port 8000
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional, List, Dict, Any
 import socket
 import json
@@ -171,6 +171,13 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 class TempoRequest(BaseModel):
     tempo: float
 
+    @field_validator('tempo')
+    @classmethod
+    def validate_tempo(cls, v):
+        if not 20 <= v <= 300:
+            raise ValueError('Tempo must be between 20 and 300 BPM')
+        return v
+
 class TrackRequest(BaseModel):
     track_index: int
 
@@ -189,8 +196,22 @@ class TrackBoolRequest(BaseModel):
 class TrackVolumeRequest(BaseModel):
     volume: float  # 0.0 to 1.0
 
+    @field_validator('volume')
+    @classmethod
+    def validate_volume(cls, v):
+        if not 0 <= v <= 1:
+            raise ValueError('Volume must be between 0.0 and 1.0')
+        return v
+
 class TrackPanRequest(BaseModel):
     pan: float  # -1.0 to 1.0
+
+    @field_validator('pan')
+    @classmethod
+    def validate_pan(cls, v):
+        if not -1 <= v <= 1:
+            raise ValueError('Pan must be between -1.0 and 1.0')
+        return v
 
 class TrackColorRequest(BaseModel):
     track_index: int
@@ -233,6 +254,27 @@ class Note(BaseModel):
     start_time: float
     duration: float
     velocity: Optional[int] = 100
+
+    @field_validator('pitch')
+    @classmethod
+    def validate_pitch(cls, v):
+        if not 0 <= v <= 127:
+            raise ValueError('Pitch must be between 0 and 127')
+        return v
+
+    @field_validator('velocity')
+    @classmethod
+    def validate_velocity(cls, v):
+        if v is not None and not 0 <= v <= 127:
+            raise ValueError('Velocity must be between 0 and 127')
+        return v
+
+    @field_validator('duration')
+    @classmethod
+    def validate_duration(cls, v):
+        if v <= 0:
+            raise ValueError('Duration must be positive')
+        return v
 
 class AddNotesRequest(BaseModel):
     track_index: int
@@ -317,9 +359,7 @@ class ScaleRequest(BaseModel):
     octave: Optional[int] = 4
 
 class QuantizeRequest(BaseModel):
-    track_index: int
-    clip_index: int
-    grid_size: float
+    grid: float = 0.25  # Grid size in beats (0.25 = 16th notes, 0.5 = 8th, 1.0 = quarter)
     strength: Optional[float] = 1.0
 
 class HumanizeTimingRequest(BaseModel):
@@ -329,16 +369,17 @@ class HumanizeVelocityRequest(BaseModel):
     amount: float
 
 class DrumPatternRequest(BaseModel):
-    style: str
-    bars: Optional[int] = 2
-    swing: Optional[float] = 0.0
+    track_index: int  # Target track index
+    clip_index: int   # Target clip slot index
+    style: str = "basic"  # Pattern style: basic, house, techno, breakbeat
+    length: float = 4.0   # Length in beats
 
 class BasslineRequest(BaseModel):
-    root: str
-    scale: str
-    style: str
-    bars: Optional[int] = 2
-    octave: Optional[int] = 2
+    track_index: int  # Target track index
+    clip_index: int   # Target clip slot index
+    root: int = 36    # Root note as MIDI number (36 = C1)
+    scale_type: str = "minor"  # Scale type: major, minor, dorian, etc.
+    length: float = 4.0  # Length in beats
 
 class BrowserRequest(BaseModel):
     path: Optional[str] = None
@@ -617,7 +658,7 @@ def quantize_clip(track_index: int, clip_index: int, req: QuantizeRequest):
     return ableton.send_command("quantize_clip_notes", {
         "track_index": track_index,
         "clip_index": clip_index,
-        "grid_size": req.grid_size,
+        "grid": req.grid,
         "strength": req.strength
     })
 
@@ -640,19 +681,115 @@ def humanize_velocity(track_index: int, clip_index: int, req: HumanizeVelocityRe
 @app.post("/api/music/drums")
 def generate_drum_pattern(req: DrumPatternRequest):
     return ableton.send_command("generate_drum_pattern", {
+        "track_index": req.track_index,
+        "clip_index": req.clip_index,
         "style": req.style,
-        "bars": req.bars,
-        "swing": req.swing
+        "length": req.length
     })
 
 @app.post("/api/music/bassline")
 def generate_bassline(req: BasslineRequest):
     return ableton.send_command("generate_bassline", {
+        "track_index": req.track_index,
+        "clip_index": req.clip_index,
         "root": req.root,
-        "scale": req.scale,
-        "style": req.style,
-        "bars": req.bars,
-        "octave": req.octave
+        "scale_type": req.scale_type,
+        "length": req.length
+    })
+
+# ============================================================================
+# Master Track Control
+# ============================================================================
+
+class MasterVolumeRequest(BaseModel):
+    volume: float
+
+    @field_validator('volume')
+    @classmethod
+    def validate_volume(cls, v):
+        if not 0 <= v <= 1:
+            raise ValueError('Volume must be between 0.0 and 1.0')
+        return v
+
+class MasterPanRequest(BaseModel):
+    pan: float
+
+    @field_validator('pan')
+    @classmethod
+    def validate_pan(cls, v):
+        if not -1 <= v <= 1:
+            raise ValueError('Pan must be between -1.0 and 1.0')
+        return v
+
+@app.get("/api/master")
+def get_master_info():
+    """Get master track information including volume, pan, and devices"""
+    return ableton.send_command("get_master_info")
+
+@app.post("/api/master/volume")
+def set_master_volume(req: MasterVolumeRequest):
+    """Set master track volume (0.0 to 1.0)"""
+    return ableton.send_command("set_master_volume", {"volume": req.volume})
+
+@app.post("/api/master/pan")
+def set_master_pan(req: MasterPanRequest):
+    """Set master track pan (-1.0 to 1.0)"""
+    return ableton.send_command("set_master_pan", {"pan": req.pan})
+
+# ============================================================================
+# Browser
+# ============================================================================
+
+class BrowsePathRequest(BaseModel):
+    path: List[str]  # e.g. ["Audio Effects", "EQ Eight"]
+
+class BrowserSearchRequest(BaseModel):
+    query: str
+    category: str = "all"  # all, instruments, sounds, drums, audio_effects, midi_effects
+
+class BrowserChildrenRequest(BaseModel):
+    uri: str
+
+class LoadItemToTrackRequest(BaseModel):
+    track_index: int
+    uri: str
+
+class LoadItemToReturnRequest(BaseModel):
+    return_index: int
+    uri: str
+
+@app.post("/api/browser/browse")
+def browse_path(req: BrowsePathRequest):
+    """Navigate browser by path list"""
+    return ableton.send_command("browse_path", {"path": req.path})
+
+@app.post("/api/browser/search")
+def search_browser(req: BrowserSearchRequest):
+    """Search browser for items matching query"""
+    return ableton.send_command("search_browser", {
+        "query": req.query,
+        "category": req.category
+    })
+
+@app.post("/api/browser/children")
+def get_browser_children(req: BrowserChildrenRequest):
+    """Get children of a browser item by URI"""
+    return ableton.send_command("get_browser_children", {"uri": req.uri})
+
+@app.post("/api/browser/load")
+def load_item_to_track(req: LoadItemToTrackRequest):
+    """Load a browser item onto a track"""
+    return ableton.send_command("load_instrument_or_effect", {
+        "track_index": req.track_index,
+        "uri": req.uri
+    })
+
+@app.post("/api/browser/load-to-return")
+def load_item_to_return(req: LoadItemToReturnRequest):
+    """Load a browser item onto a return track"""
+    return ableton.send_command("load_browser_item_to_return", {
+        "return_index": req.return_index,
+        "item_uri": req.uri
     })
 
 # ============================================================================

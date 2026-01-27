@@ -616,9 +616,34 @@ class AbletonMCP(ControlSurface):
             elif command_type == "get_browser_items_at_path":
                 path = params.get("path", "")
                 response["result"] = self.get_browser_items_at_path(path)
+            # Additional browser commands for robustness
+            elif command_type == "browse_path":
+                path = params.get("path", [])
+                response["result"] = self._browse_path(path)
+            elif command_type == "get_browser_children":
+                uri = params.get("uri", "")
+                response["result"] = self._get_browser_children(uri)
+            elif command_type == "search_browser":
+                query = params.get("query", "")
+                category = params.get("category", "all")
+                response["result"] = self._search_browser(query, category)
+            # Master track commands
+            elif command_type == "set_master_volume":
+                volume = params.get("volume", 0.85)
+                response["result"] = self._set_master_volume(volume)
+            elif command_type == "set_master_pan":
+                pan = params.get("pan", 0.0)
+                response["result"] = self._set_master_pan(pan)
+            elif command_type == "get_master_info":
+                response["result"] = self._get_master_info()
+            # Return track commands
+            elif command_type == "load_browser_item_to_return":
+                return_index = params.get("return_index", 0)
+                item_uri = params.get("item_uri", "")
+                response["result"] = self._load_browser_item_to_return(return_index, item_uri)
             else:
                 response["status"] = "error"
-                response["message"] = "Unknown command: " + command_type
+                response["message"] = f"Unknown command: {command_type}. Available commands include: get_session_info, get_track_info, set_track_volume, set_track_pan, create_clip, add_notes_to_clip, fire_scene, load_browser_item, etc."
         except Exception as e:
             self.log_message("Error processing command: " + str(e))
             self.log_message(traceback.format_exc())
@@ -648,6 +673,340 @@ class AbletonMCP(ControlSurface):
         if scene_index < 0 or scene_index >= len(self._song.scenes):
             raise IndexError(f"Scene index {scene_index} out of range (0-{len(self._song.scenes)-1})")
         return self._song.scenes[scene_index]
+
+    def _validate_device_index(self, track, device_index):
+        """Validate device index on a track"""
+        if device_index < 0 or device_index >= len(track.devices):
+            raise IndexError(f"Device index {device_index} out of range (0-{len(track.devices)-1})")
+        return track.devices[device_index]
+
+    def _validate_return_track_index(self, return_index):
+        """Validate return track index"""
+        if return_index < 0 or return_index >= len(self._song.return_tracks):
+            raise IndexError(f"Return track index {return_index} out of range (0-{len(self._song.return_tracks)-1})")
+        return self._song.return_tracks[return_index]
+
+    def _validate_send_index(self, track, send_index):
+        """Validate send index on a track"""
+        sends = track.mixer_device.sends
+        if send_index < 0 or send_index >= len(sends):
+            raise IndexError(f"Send index {send_index} out of range (0-{len(sends)-1})")
+        return sends[send_index]
+
+    def _clamp_volume(self, value):
+        """Clamp volume to valid range 0.0-1.0"""
+        return max(0.0, min(1.0, float(value)))
+
+    def _clamp_pan(self, value):
+        """Clamp pan to valid range -1.0 to 1.0"""
+        return max(-1.0, min(1.0, float(value)))
+
+    # =====================================================
+    # Master Track Methods
+    # =====================================================
+
+    def _set_master_volume(self, volume):
+        """Set master track volume (0.0 to 1.0)"""
+        try:
+            volume = self._clamp_volume(volume)
+            self._song.master_track.mixer_device.volume.value = volume
+            return {
+                "volume": self._song.master_track.mixer_device.volume.value,
+                "success": True
+            }
+        except Exception as e:
+            self.log_message("Error setting master volume: " + str(e))
+            raise
+
+    def _set_master_pan(self, pan):
+        """Set master track pan (-1.0 to 1.0)"""
+        try:
+            pan = self._clamp_pan(pan)
+            self._song.master_track.mixer_device.panning.value = pan
+            return {
+                "panning": self._song.master_track.mixer_device.panning.value,
+                "success": True
+            }
+        except Exception as e:
+            self.log_message("Error setting master pan: " + str(e))
+            raise
+
+    def _get_master_info(self):
+        """Get master track info including devices"""
+        try:
+            master = self._song.master_track
+            devices = []
+            for i, device in enumerate(master.devices):
+                devices.append({
+                    "index": i,
+                    "name": device.name,
+                    "class_name": device.class_name,
+                    "is_active": device.is_active
+                })
+
+            return {
+                "name": "Master",
+                "volume": master.mixer_device.volume.value,
+                "panning": master.mixer_device.panning.value,
+                "device_count": len(master.devices),
+                "devices": devices
+            }
+        except Exception as e:
+            self.log_message("Error getting master info: " + str(e))
+            raise
+
+    # =====================================================
+    # Browser Methods
+    # =====================================================
+
+    def _browse_path(self, path_list):
+        """Navigate browser by path list e.g. ['Sounds', 'Bass', 'Sub Bass']"""
+        try:
+            app = self.application()
+            browser = app.browser
+
+            # Map category names to browser attributes (case-insensitive)
+            category_map = {
+                "instruments": browser.instruments,
+                "sounds": browser.sounds,
+                "drums": browser.drums,
+                "audio_effects": browser.audio_effects,
+                "midi_effects": browser.midi_effects,
+            }
+
+            # Add samples and packs if available
+            if hasattr(browser, 'samples'):
+                category_map["samples"] = browser.samples
+            if hasattr(browser, 'packs'):
+                category_map["packs"] = browser.packs
+
+            if not path_list:
+                # Return available categories
+                return {
+                    "path": [],
+                    "available_categories": list(category_map.keys()),
+                    "items": []
+                }
+
+            # Get starting category (normalize to lowercase with underscores)
+            category = path_list[0].lower().replace(" ", "_")
+            if category not in category_map:
+                return {
+                    "error": "Unknown category: {0}".format(category),
+                    "available_categories": list(category_map.keys())
+                }
+
+            current = category_map[category]
+
+            # Navigate through remaining path parts
+            for i in range(1, len(path_list)):
+                part = path_list[i]
+                found = False
+                if hasattr(current, 'children'):
+                    for child in current.children:
+                        if child.name.lower() == part.lower():
+                            current = child
+                            found = True
+                            break
+                if not found:
+                    return {
+                        "error": "Path part '{0}' not found".format(part),
+                        "path": path_list[:i]
+                    }
+
+            # Return children of current item
+            items = []
+            if hasattr(current, 'children'):
+                for child in current.children:
+                    items.append({
+                        "name": child.name,
+                        "is_folder": child.is_folder if hasattr(child, 'is_folder') else False,
+                        "is_device": child.is_device if hasattr(child, 'is_device') else False,
+                        "is_loadable": child.is_loadable if hasattr(child, 'is_loadable') else False,
+                        "uri": child.uri if hasattr(child, 'uri') else None
+                    })
+
+            return {
+                "path": path_list,
+                "items": items,
+                "item_count": len(items)
+            }
+        except Exception as e:
+            self.log_message("Error browsing path: " + str(e))
+            raise
+
+    def _get_browser_children(self, uri):
+        """Get children of browser item by URI"""
+        try:
+            app = self.application()
+            browser = app.browser
+
+            # Find item by URI
+            item = self._find_browser_item_by_uri(browser, uri)
+            if not item:
+                return {"error": "Item not found: {0}".format(uri)}
+
+            children = []
+            if hasattr(item, 'children'):
+                for child in item.children:
+                    children.append({
+                        "name": child.name,
+                        "is_folder": child.is_folder if hasattr(child, 'is_folder') else False,
+                        "is_device": child.is_device if hasattr(child, 'is_device') else False,
+                        "is_loadable": child.is_loadable if hasattr(child, 'is_loadable') else False,
+                        "uri": child.uri if hasattr(child, 'uri') else None
+                    })
+
+            return {
+                "uri": uri,
+                "name": item.name if hasattr(item, 'name') else "Unknown",
+                "children": children,
+                "child_count": len(children)
+            }
+        except Exception as e:
+            self.log_message("Error getting browser children: " + str(e))
+            raise
+
+    def _search_browser(self, query, category="all"):
+        """Search browser for items matching query"""
+        try:
+            app = self.application()
+            browser = app.browser
+
+            results = []
+            query_lower = query.lower()
+
+            # Determine which categories to search
+            categories_to_search = []
+            if category == "all":
+                categories_to_search = [
+                    ("instruments", browser.instruments),
+                    ("sounds", browser.sounds),
+                    ("drums", browser.drums),
+                    ("audio_effects", browser.audio_effects),
+                    ("midi_effects", browser.midi_effects)
+                ]
+            elif category == "instruments":
+                categories_to_search = [("instruments", browser.instruments)]
+            elif category == "sounds":
+                categories_to_search = [("sounds", browser.sounds)]
+            elif category == "drums":
+                categories_to_search = [("drums", browser.drums)]
+            elif category == "audio_effects":
+                categories_to_search = [("audio_effects", browser.audio_effects)]
+            elif category == "midi_effects":
+                categories_to_search = [("midi_effects", browser.midi_effects)]
+            else:
+                return {"error": "Unknown category: {0}".format(category)}
+
+            def search_recursive(item, cat_name, depth=0):
+                if depth > 4:  # Limit depth for performance
+                    return
+                if len(results) >= 50:  # Limit results
+                    return
+
+                # Check if item name matches query
+                if hasattr(item, 'name') and query_lower in item.name.lower():
+                    is_loadable = item.is_loadable if hasattr(item, 'is_loadable') else False
+                    results.append({
+                        "name": item.name,
+                        "category": cat_name,
+                        "uri": item.uri if hasattr(item, 'uri') else None,
+                        "is_loadable": is_loadable,
+                        "is_device": item.is_device if hasattr(item, 'is_device') else False
+                    })
+
+                # Recurse into children
+                if hasattr(item, 'children') and (item.is_folder if hasattr(item, 'is_folder') else True):
+                    for child in item.children:
+                        search_recursive(child, cat_name, depth + 1)
+                        if len(results) >= 50:
+                            break
+
+            for cat_name, cat_item in categories_to_search:
+                if hasattr(cat_item, 'children'):
+                    for child in cat_item.children:
+                        search_recursive(child, cat_name)
+                        if len(results) >= 50:
+                            break
+
+            return {
+                "query": query,
+                "category": category,
+                "results": results,
+                "result_count": len(results)
+            }
+        except Exception as e:
+            self.log_message("Error searching browser: " + str(e))
+            raise
+
+    def _load_instrument_or_effect(self, track_index, uri):
+        """Load an instrument or effect onto a track by URI"""
+        try:
+            track = self._validate_track_index(track_index)
+
+            app = self.application()
+            browser = app.browser
+
+            # Find the browser item by URI
+            item = self._find_browser_item_by_uri(browser, uri)
+
+            if not item:
+                return {"error": "Browser item not found: {0}".format(uri)}
+
+            if not (item.is_loadable if hasattr(item, 'is_loadable') else False):
+                return {"error": "Item is not loadable: {0}".format(item.name)}
+
+            # Select the track so the item loads onto it
+            self._song.view.selected_track = track
+
+            # Load the item
+            browser.load_item(item)
+
+            return {
+                "loaded": True,
+                "item_name": item.name,
+                "track_index": track_index,
+                "track_name": track.name,
+                "uri": uri
+            }
+        except Exception as e:
+            self.log_message("Error loading instrument/effect: " + str(e))
+            raise
+
+    def _load_browser_item_to_return(self, return_index, item_uri):
+        """Load a browser item onto a return track"""
+        try:
+            return_track = self._validate_return_track_index(return_index)
+
+            app = self.application()
+            browser = app.browser
+
+            # Find the browser item by URI
+            item = self._find_browser_item_by_uri(browser, item_uri)
+
+            if not item:
+                return {"error": "Browser item not found: {0}".format(item_uri)}
+
+            if not (item.is_loadable if hasattr(item, 'is_loadable') else False):
+                return {"error": "Item is not loadable: {0}".format(item.name)}
+
+            # Select the return track
+            self._song.view.selected_track = return_track
+
+            # Load the item
+            browser.load_item(item)
+
+            return {
+                "loaded": True,
+                "item_name": item.name,
+                "return_index": return_index,
+                "return_track_name": return_track.name,
+                "uri": item_uri
+            }
+        except Exception as e:
+            self.log_message("Error loading item to return track: " + str(e))
+            raise
 
     def _get_session_info(self):
         """Get information about the current session"""

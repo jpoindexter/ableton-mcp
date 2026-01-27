@@ -1963,6 +1963,146 @@ def load_drum_kit(ctx: Context, track_index: int, rack_uri: str, kit_path: str) 
         logger.error(f"Error loading drum kit: {str(e)}")
         return f"Error loading drum kit: {str(e)}"
 
+# ==================== MASTER TRACK CONTROL ====================
+
+@mcp.tool()
+def get_master_info(ctx: Context) -> str:
+    """Get information about the master track including volume, pan, and devices."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_master_info")
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting master info: {str(e)}")
+        return f"Error getting master info: {str(e)}"
+
+@mcp.tool()
+def set_master_volume(ctx: Context, volume: float) -> str:
+    """
+    Set the master track volume.
+
+    Parameters:
+    - volume: Volume level from 0.0 (silent) to 1.0 (unity gain). 0.85 is Ableton's default.
+    """
+    try:
+        if not 0 <= volume <= 1:
+            return "Error: Volume must be between 0.0 and 1.0"
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_master_volume", {"volume": volume})
+        return f"Master volume set to {result.get('volume', volume):.2f}"
+    except Exception as e:
+        logger.error(f"Error setting master volume: {str(e)}")
+        return f"Error setting master volume: {str(e)}"
+
+@mcp.tool()
+def set_master_pan(ctx: Context, pan: float) -> str:
+    """
+    Set the master track panning.
+
+    Parameters:
+    - pan: Pan position from -1.0 (full left) to 1.0 (full right). 0.0 is center.
+    """
+    try:
+        if not -1 <= pan <= 1:
+            return "Error: Pan must be between -1.0 and 1.0"
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_master_pan", {"pan": pan})
+        return f"Master pan set to {result.get('panning', pan):.2f}"
+    except Exception as e:
+        logger.error(f"Error setting master pan: {str(e)}")
+        return f"Error setting master pan: {str(e)}"
+
+# ==================== BROWSER SEARCH & NAVIGATION ====================
+
+@mcp.tool()
+def browse_path(ctx: Context, path: list) -> str:
+    """
+    Navigate browser by path list to get items at that location.
+
+    Parameters:
+    - path: List of path components, e.g. ["Audio Effects", "EQ Eight"] or ["Sounds", "Bass"]
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("browse_path", {"path": path})
+        if "error" in result:
+            return f"Error: {result.get('error')}. Available categories: {result.get('available_categories', [])}"
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error browsing path: {str(e)}")
+        return f"Error browsing path: {str(e)}"
+
+@mcp.tool()
+def search_browser(ctx: Context, query: str, category: str = "all") -> str:
+    """
+    Search the browser for items matching a query.
+
+    Parameters:
+    - query: Search term to find in item names
+    - category: Category to search in (all, instruments, sounds, drums, audio_effects, midi_effects)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("search_browser", {
+            "query": query,
+            "category": category
+        })
+        if "error" in result:
+            return f"Error: {result.get('error')}"
+
+        count = result.get('result_count', 0)
+        if count == 0:
+            return f"No results found for '{query}' in category '{category}'"
+
+        return f"Found {count} results for '{query}':\n" + json.dumps(result.get('results', []), indent=2)
+    except Exception as e:
+        logger.error(f"Error searching browser: {str(e)}")
+        return f"Error searching browser: {str(e)}"
+
+@mcp.tool()
+def load_item_to_track(ctx: Context, track_index: int, uri: str) -> str:
+    """
+    Load a browser item (instrument or effect) onto a track by URI.
+
+    Parameters:
+    - track_index: The index of the track to load the item onto
+    - uri: The URI of the browser item (obtained from browse_path or search_browser)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("load_instrument_or_effect", {
+            "track_index": track_index,
+            "uri": uri
+        })
+        if "error" in result:
+            return f"Error: {result.get('error')}"
+        return f"Loaded '{result.get('item_name')}' on track '{result.get('track_name')}'"
+    except Exception as e:
+        logger.error(f"Error loading item to track: {str(e)}")
+        return f"Error loading item to track: {str(e)}"
+
+@mcp.tool()
+def load_item_to_return(ctx: Context, return_index: int, uri: str) -> str:
+    """
+    Load a browser item (effect) onto a return track by URI.
+
+    Parameters:
+    - return_index: The index of the return track to load the item onto
+    - uri: The URI of the browser item (obtained from browse_path or search_browser)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("load_browser_item_to_return", {
+            "return_index": return_index,
+            "item_uri": uri
+        })
+        if "error" in result:
+            return f"Error: {result.get('error')}"
+        return f"Loaded '{result.get('item_name')}' on return track '{result.get('return_track_name')}'"
+    except Exception as e:
+        logger.error(f"Error loading item to return track: {str(e)}")
+        return f"Error loading item to return track: {str(e)}"
+
 # Main execution
 def main():
     """Run the MCP server"""
