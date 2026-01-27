@@ -35,12 +35,14 @@ class AbletonConnection:
         self.host = host
         self.port = port
         self.sock = None
+        self._max_retries = 2
 
     def connect(self) -> bool:
         if self.sock:
             return True
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.settimeout(5.0)
             self.sock.connect((self.host, self.port))
             logger.info(f"Connected to Ableton at {self.host}:{self.port}")
             return True
@@ -57,42 +59,69 @@ class AbletonConnection:
                 pass
             self.sock = None
 
+    def _reconnect(self) -> bool:
+        """Force a reconnection"""
+        self.disconnect()
+        return self.connect()
+
     def send_command(self, command_type: str, params: dict = None) -> dict:
-        if not self.connect():
-            raise Exception("Could not connect to Ableton. Make sure the Remote Script is running.")
+        last_error = None
 
-        command = {"type": command_type, "params": params or {}}
+        for attempt in range(self._max_retries + 1):
+            if not self.connect():
+                if attempt < self._max_retries:
+                    logger.warning(f"Connection failed, retrying ({attempt + 1}/{self._max_retries})")
+                    continue
+                raise HTTPException(
+                    status_code=503,
+                    detail="Could not connect to Ableton. Make sure Live is running with the AbletonMCP control surface enabled."
+                )
 
-        try:
-            self.sock.sendall(json.dumps(command).encode('utf-8'))
-            self.sock.settimeout(15.0)
+            command = {"type": command_type, "params": params or {}}
 
-            chunks = []
-            while True:
-                try:
-                    chunk = self.sock.recv(8192)
-                    if not chunk:
-                        break
-                    chunks.append(chunk)
+            try:
+                self.sock.sendall(json.dumps(command).encode('utf-8'))
+                self.sock.settimeout(15.0)
+
+                chunks = []
+                while True:
                     try:
-                        json.loads(b''.join(chunks).decode('utf-8'))
+                        chunk = self.sock.recv(8192)
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                        try:
+                            json.loads(b''.join(chunks).decode('utf-8'))
+                            break
+                        except json.JSONDecodeError:
+                            continue
+                    except socket.timeout:
                         break
-                    except json.JSONDecodeError:
-                        continue
-                except socket.timeout:
-                    break
 
-            response_data = b''.join(chunks)
-            response = json.loads(response_data.decode('utf-8'))
+                if not chunks:
+                    raise Exception("No response from Ableton")
 
-            if response.get("status") == "error":
-                raise Exception(response.get("message", "Unknown error"))
+                response_data = b''.join(chunks)
+                response = json.loads(response_data.decode('utf-8'))
 
-            return response.get("result", {})
+                if response.get("status") == "error":
+                    error_msg = response.get("message", "Unknown error from Ableton")
+                    raise HTTPException(status_code=400, detail=error_msg)
 
-        except Exception as e:
-            self.sock = None
-            raise Exception(f"Communication error: {str(e)}")
+                return response.get("result", {})
+
+            except HTTPException:
+                raise
+            except json.JSONDecodeError as e:
+                last_error = f"Invalid response from Ableton: {str(e)}"
+                self._reconnect()
+            except Exception as e:
+                last_error = str(e)
+                self._reconnect()
+                if attempt < self._max_retries:
+                    logger.warning(f"Command failed, retrying ({attempt + 1}/{self._max_retries}): {last_error}")
+
+        raise HTTPException(status_code=500, detail=f"Command failed after retries: {last_error}")
 
 
 # Global connection
@@ -115,6 +144,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Global exception handler for cleaner error responses
+from fastapi.responses import JSONResponse
+from fastapi import Request
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception: {str(exc)}")
+    return JSONResponse(
+        status_code=500,
+        content={"error": str(exc), "detail": "An unexpected error occurred"}
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.detail}
+    )
 
 # ============================================================================
 # Request Models

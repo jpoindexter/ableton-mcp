@@ -624,7 +624,27 @@ class AbletonMCP(ControlSurface):
         return response
     
     # Command implementations
-    
+
+    # Validation helpers
+    def _validate_track_index(self, track_index):
+        """Validate track index and raise clear error if out of range"""
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError(f"Track index {track_index} out of range (0-{len(self._song.tracks)-1})")
+        return self._song.tracks[track_index]
+
+    def _validate_clip_slot(self, track_index, clip_index):
+        """Validate track and clip indices, return clip slot"""
+        track = self._validate_track_index(track_index)
+        if clip_index < 0 or clip_index >= len(track.clip_slots):
+            raise IndexError(f"Clip index {clip_index} out of range (0-{len(track.clip_slots)-1})")
+        return track.clip_slots[clip_index]
+
+    def _validate_scene_index(self, scene_index):
+        """Validate scene index and raise clear error if out of range"""
+        if scene_index < 0 or scene_index >= len(self._song.scenes):
+            raise IndexError(f"Scene index {scene_index} out of range (0-{len(self._song.scenes)-1})")
+        return self._song.scenes[scene_index]
+
     def _get_session_info(self):
         """Get information about the current session"""
         try:
