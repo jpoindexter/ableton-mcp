@@ -408,6 +408,63 @@ class AbletonMCP(ControlSurface):
                 response["result"] = self._get_punch_settings()
             elif command_type == "get_back_to_arrangement":
                 response["result"] = self._get_back_to_arrangement()
+            # Track state queries
+            elif command_type == "get_track_delay":
+                track_index = params.get("track_index", 0)
+                response["result"] = self._get_track_delay(track_index)
+            elif command_type == "get_track_is_grouped":
+                track_index = params.get("track_index", 0)
+                response["result"] = self._get_track_is_grouped(track_index)
+            elif command_type == "get_track_is_foldable":
+                track_index = params.get("track_index", 0)
+                response["result"] = self._get_track_is_foldable(track_index)
+            # Clip queries
+            elif command_type == "get_clip_start_end_markers":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_clip_start_end_markers(track_index, clip_index)
+            elif command_type == "get_clip_is_playing":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_clip_is_playing(track_index, clip_index)
+            elif command_type == "get_clip_velocity_amount":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_clip_velocity_amount(track_index, clip_index)
+            # Selection queries
+            elif command_type == "get_selected_track":
+                response["result"] = self._get_selected_track()
+            elif command_type == "get_selected_scene":
+                response["result"] = self._get_selected_scene()
+            # Quantization queries
+            elif command_type == "get_clip_trigger_quantization":
+                response["result"] = self._get_clip_trigger_quantization()
+            elif command_type == "get_midi_recording_quantization":
+                response["result"] = self._get_midi_recording_quantization()
+            # Global settings queries
+            elif command_type == "get_groove_amount":
+                response["result"] = self._get_groove_amount()
+            elif command_type == "get_exclusive_arm":
+                response["result"] = self._get_exclusive_arm()
+            elif command_type == "get_exclusive_solo":
+                response["result"] = self._get_exclusive_solo()
+            elif command_type == "get_record_mode":
+                response["result"] = self._get_record_mode()
+            elif command_type == "get_can_capture_midi":
+                response["result"] = self._get_can_capture_midi()
+            # Song info queries
+            elif command_type == "get_signature":
+                response["result"] = self._get_signature()
+            elif command_type == "get_song_length":
+                response["result"] = self._get_song_length()
+            elif command_type == "get_current_song_time":
+                response["result"] = self._get_current_song_time()
+            elif command_type == "get_master_output_meter":
+                response["result"] = self._get_master_output_meter()
+            elif command_type == "get_device_view_state":
+                track_index = params.get("track_index", 0)
+                device_index = params.get("device_index", 0)
+                response["result"] = self._get_device_view_state(track_index, device_index)
             # Music theory queries (no modification needed)
             elif command_type == "get_scale_notes":
                 root = params.get("root", 0)
@@ -463,7 +520,27 @@ class AbletonMCP(ControlSurface):
                                  # Drum rack
                                  "set_drum_rack_pad_mute", "set_drum_rack_pad_solo", "set_rack_macro",
                                  # Punch
-                                 "set_punch_in", "set_punch_out", "trigger_back_to_arrangement"]:
+                                 "set_punch_in", "set_punch_out", "trigger_back_to_arrangement",
+                                 # Track properties
+                                 "set_track_delay",
+                                 # Clip markers
+                                 "set_clip_start_marker", "set_clip_end_marker", "set_clip_velocity_amount",
+                                 # Quantization
+                                 "set_clip_trigger_quantization", "set_midi_recording_quantization",
+                                 # Global settings
+                                 "set_groove_amount", "set_exclusive_arm", "set_exclusive_solo",
+                                 # Transport
+                                 "continue_playing", "tap_tempo", "stop_all_clips",
+                                 # Song
+                                 "set_signature", "set_current_song_time",
+                                 # Return tracks
+                                 "create_return_track", "delete_return_track",
+                                 # Multi-track operations
+                                 "solo_exclusive", "unsolo_all", "unmute_all",
+                                 # Device
+                                 "move_device", "set_device_collapsed",
+                                 # Cue points
+                                 "jump_to_cue_point"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -954,6 +1031,82 @@ class AbletonMCP(ControlSurface):
                             result = self._set_punch_out(enabled)
                         elif command_type == "trigger_back_to_arrangement":
                             result = self._trigger_back_to_arrangement()
+
+                        # ============================================
+                        # Additional LOM Features
+                        # ============================================
+                        elif command_type == "set_track_delay":
+                            track_index = params.get("track_index", 0)
+                            delay_ms = params.get("delay_ms", 0)
+                            result = self._set_track_delay(track_index, delay_ms)
+                        elif command_type == "set_clip_start_marker":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            position = params.get("position", 0)
+                            result = self._set_clip_start_marker(track_index, clip_index, position)
+                        elif command_type == "set_clip_end_marker":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            position = params.get("position", 0)
+                            result = self._set_clip_end_marker(track_index, clip_index, position)
+                        elif command_type == "set_clip_velocity_amount":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            amount = params.get("amount", 1.0)
+                            result = self._set_clip_velocity_amount(track_index, clip_index, amount)
+                        elif command_type == "set_clip_trigger_quantization":
+                            quant = params.get("quantization", 4)
+                            result = self._set_clip_trigger_quantization(quant)
+                        elif command_type == "set_midi_recording_quantization":
+                            quant = params.get("quantization", 0)
+                            result = self._set_midi_recording_quantization(quant)
+                        elif command_type == "set_groove_amount":
+                            amount = params.get("amount", 1.0)
+                            result = self._set_groove_amount(amount)
+                        elif command_type == "set_exclusive_arm":
+                            enabled = params.get("enabled", True)
+                            result = self._set_exclusive_arm(enabled)
+                        elif command_type == "set_exclusive_solo":
+                            enabled = params.get("enabled", False)
+                            result = self._set_exclusive_solo(enabled)
+                        elif command_type == "continue_playing":
+                            result = self._continue_playing()
+                        elif command_type == "tap_tempo":
+                            result = self._tap_tempo()
+                        elif command_type == "stop_all_clips":
+                            result = self._stop_all_clips()
+                        elif command_type == "set_signature":
+                            numerator = params.get("numerator", 4)
+                            denominator = params.get("denominator", 4)
+                            result = self._set_signature(numerator, denominator)
+                        elif command_type == "set_current_song_time":
+                            time = params.get("time", 0)
+                            result = self._set_current_song_time(time)
+                        elif command_type == "create_return_track":
+                            result = self._create_return_track()
+                        elif command_type == "delete_return_track":
+                            index = params.get("index", 0)
+                            result = self._delete_return_track(index)
+                        elif command_type == "solo_exclusive":
+                            track_index = params.get("track_index", 0)
+                            result = self._solo_exclusive(track_index)
+                        elif command_type == "unsolo_all":
+                            result = self._unsolo_all()
+                        elif command_type == "unmute_all":
+                            result = self._unmute_all()
+                        elif command_type == "move_device":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            new_index = params.get("new_index", 0)
+                            result = self._move_device(track_index, device_index, new_index)
+                        elif command_type == "set_device_collapsed":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            collapsed = params.get("collapsed", False)
+                            result = self._set_device_collapsed(track_index, device_index, collapsed)
+                        elif command_type == "jump_to_cue_point":
+                            index = params.get("index", 0)
+                            result = self._jump_to_cue_point(index)
 
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
@@ -5577,4 +5730,393 @@ class AbletonMCP(ControlSurface):
             return {"error": "Back to arrangement not available"}
         except Exception as e:
             self.log_message("Error triggering back to arrangement: " + str(e))
+            return {"error": str(e)}
+
+    # ============================================================================
+    # TIER 2: Complete LOM Coverage - Additional Features
+    # ============================================================================
+
+    def _get_track_delay(self, track_index):
+        """Get track delay in ms"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            if hasattr(track.mixer_device, 'track_delay'):
+                return {"track_delay": track.mixer_device.track_delay.value}
+            return {"error": "Track delay not available"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _set_track_delay(self, track_index, delay_ms):
+        """Set track delay in ms"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            if hasattr(track.mixer_device, 'track_delay'):
+                track.mixer_device.track_delay.value = delay_ms
+                return {"success": True}
+            return {"error": "Track delay not available"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_clip_start_end_markers(self, track_index, clip_index):
+        """Get clip start/end markers"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            clip_slot = tracks[track_index].clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                return {"error": "No clip"}
+            clip = clip_slot.clip
+            return {"start_marker": clip.start_marker, "end_marker": clip.end_marker, "length": clip.length}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _set_clip_start_marker(self, track_index, clip_index, position):
+        """Set clip start marker"""
+        try:
+            tracks = list(self._song.tracks)
+            clip = tracks[track_index].clip_slots[clip_index].clip
+            clip.start_marker = position
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _set_clip_end_marker(self, track_index, clip_index, position):
+        """Set clip end marker"""
+        try:
+            tracks = list(self._song.tracks)
+            clip = tracks[track_index].clip_slots[clip_index].clip
+            clip.end_marker = position
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_selected_track(self):
+        """Get selected track index"""
+        try:
+            selected = self._song.view.selected_track
+            for i, t in enumerate(self._song.tracks):
+                if t == selected:
+                    return {"selected_track_index": i, "name": t.name}
+            return {"selected_track_index": -1}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_selected_scene(self):
+        """Get selected scene index"""
+        try:
+            selected = self._song.view.selected_scene
+            for i, s in enumerate(self._song.scenes):
+                if s == selected:
+                    return {"selected_scene_index": i}
+            return {"selected_scene_index": -1}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_clip_trigger_quantization(self):
+        """Get global clip trigger quantization"""
+        try:
+            return {"clip_trigger_quantization": self._song.clip_trigger_quantization}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _set_clip_trigger_quantization(self, quant):
+        """Set global clip trigger quantization"""
+        try:
+            self._song.clip_trigger_quantization = quant
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_midi_recording_quantization(self):
+        """Get MIDI recording quantization"""
+        try:
+            return {"midi_recording_quantization": self._song.midi_recording_quantization}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _set_midi_recording_quantization(self, quant):
+        """Set MIDI recording quantization"""
+        try:
+            self._song.midi_recording_quantization = quant
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_groove_amount(self):
+        """Get global groove amount"""
+        try:
+            return {"groove_amount": self._song.groove_amount if hasattr(self._song, 'groove_amount') else 1.0}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _set_groove_amount(self, amount):
+        """Set global groove amount"""
+        try:
+            self._song.groove_amount = max(0.0, min(1.0, amount))
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_exclusive_arm(self):
+        """Get exclusive arm setting"""
+        try:
+            return {"exclusive_arm": self._song.exclusive_arm if hasattr(self._song, 'exclusive_arm') else True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _set_exclusive_arm(self, enabled):
+        """Set exclusive arm"""
+        try:
+            self._song.exclusive_arm = enabled
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_exclusive_solo(self):
+        """Get exclusive solo setting"""
+        try:
+            return {"exclusive_solo": self._song.exclusive_solo if hasattr(self._song, 'exclusive_solo') else False}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _set_exclusive_solo(self, enabled):
+        """Set exclusive solo"""
+        try:
+            self._song.exclusive_solo = enabled
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_record_mode(self):
+        """Get record mode states"""
+        try:
+            return {
+                "session_record": self._song.session_record,
+                "overdub": self._song.overdub if hasattr(self._song, 'overdub') else False
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _continue_playing(self):
+        """Continue playing from current position"""
+        try:
+            self._song.continue_playing()
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _tap_tempo(self):
+        """Tap tempo"""
+        try:
+            self._song.tap_tempo()
+            return {"success": True, "tempo": self._song.tempo}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_can_capture_midi(self):
+        """Check if MIDI can be captured"""
+        try:
+            return {"can_capture_midi": self._song.can_capture_midi if hasattr(self._song, 'can_capture_midi') else False}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_track_is_grouped(self, track_index):
+        """Check if track is in a group"""
+        try:
+            track = list(self._song.tracks)[track_index]
+            return {"is_grouped": track.is_grouped if hasattr(track, 'is_grouped') else False}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_track_is_foldable(self, track_index):
+        """Check if track can be folded (is group track)"""
+        try:
+            track = list(self._song.tracks)[track_index]
+            return {
+                "is_foldable": track.is_foldable if hasattr(track, 'is_foldable') else False,
+                "fold_state": track.fold_state if hasattr(track, 'fold_state') else None
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_clip_is_playing(self, track_index, clip_index):
+        """Check if clip is playing"""
+        try:
+            clip = list(self._song.tracks)[track_index].clip_slots[clip_index].clip
+            return {
+                "is_playing": clip.is_playing,
+                "is_triggered": clip.is_triggered,
+                "playing_position": clip.playing_position if hasattr(clip, 'playing_position') else 0
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _stop_all_clips(self):
+        """Stop all playing clips"""
+        try:
+            self._song.stop_all_clips()
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_signature(self):
+        """Get time signature"""
+        try:
+            return {"numerator": self._song.signature_numerator, "denominator": self._song.signature_denominator}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _set_signature(self, numerator, denominator):
+        """Set time signature"""
+        try:
+            self._song.signature_numerator = numerator
+            self._song.signature_denominator = denominator
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_song_length(self):
+        """Get song length in beats"""
+        try:
+            return {"song_length": self._song.song_length if hasattr(self._song, 'song_length') else 0}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_current_song_time(self):
+        """Get current playback position"""
+        try:
+            return {"current_song_time": self._song.current_song_time, "is_playing": self._song.is_playing}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _set_current_song_time(self, time):
+        """Set playback position (scrub)"""
+        try:
+            self._song.current_song_time = time
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _create_return_track(self):
+        """Create return track"""
+        try:
+            self._song.create_return_track()
+            return {"success": True, "count": len(list(self._song.return_tracks))}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _delete_return_track(self, index):
+        """Delete return track"""
+        try:
+            self._song.delete_return_track(index)
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_master_output_meter(self):
+        """Get master output meter levels"""
+        try:
+            m = self._song.master_track
+            return {
+                "left": m.output_meter_left if hasattr(m, 'output_meter_left') else 0,
+                "right": m.output_meter_right if hasattr(m, 'output_meter_right') else 0
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _solo_exclusive(self, track_index):
+        """Solo track exclusively"""
+        try:
+            for t in self._song.tracks:
+                t.solo = False
+            list(self._song.tracks)[track_index].solo = True
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _unsolo_all(self):
+        """Unsolo all tracks"""
+        try:
+            for t in self._song.tracks:
+                t.solo = False
+            for t in self._song.return_tracks:
+                t.solo = False
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _unmute_all(self):
+        """Unmute all tracks"""
+        try:
+            for t in self._song.tracks:
+                t.mute = False
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _move_device(self, track_index, device_index, new_index):
+        """Move device to new position"""
+        try:
+            track = list(self._song.tracks)[track_index]
+            device = list(track.devices)[device_index]
+            self._song.move_device(device, track, new_index)
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_device_view_state(self, track_index, device_index):
+        """Get device view state"""
+        try:
+            device = list(self._song.tracks)[track_index].devices[device_index]
+            return {
+                "name": device.name,
+                "is_active": device.is_active,
+                "is_collapsed": device.view.is_collapsed if hasattr(device, 'view') and hasattr(device.view, 'is_collapsed') else None
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _set_device_collapsed(self, track_index, device_index, collapsed):
+        """Set device collapsed state"""
+        try:
+            device = list(self._song.tracks)[track_index].devices[device_index]
+            if hasattr(device, 'view') and hasattr(device.view, 'is_collapsed'):
+                device.view.is_collapsed = collapsed
+                return {"success": True}
+            return {"error": "Not available"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_clip_velocity_amount(self, track_index, clip_index):
+        """Get MIDI clip velocity amount"""
+        try:
+            clip = list(self._song.tracks)[track_index].clip_slots[clip_index].clip
+            if not clip.is_midi_clip:
+                return {"error": "Not MIDI clip"}
+            return {"velocity_amount": clip.velocity_amount if hasattr(clip, 'velocity_amount') else 1.0}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _set_clip_velocity_amount(self, track_index, clip_index, amount):
+        """Set MIDI clip velocity amount"""
+        try:
+            clip = list(self._song.tracks)[track_index].clip_slots[clip_index].clip
+            clip.velocity_amount = amount
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _jump_to_cue_point(self, index):
+        """Jump to cue point"""
+        try:
+            list(self._song.cue_points)[index].jump()
+            return {"success": True}
+        except Exception as e:
             return {"error": str(e)}

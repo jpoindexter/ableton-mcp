@@ -136,6 +136,30 @@ ALLOWED_COMMANDS = {
     # Punch and arrangement
     "get_punch_settings", "set_punch_in", "set_punch_out",
     "get_back_to_arrangement", "trigger_back_to_arrangement",
+    # Track delay and state
+    "get_track_delay", "set_track_delay", "get_track_is_grouped", "get_track_is_foldable",
+    # Clip markers and state
+    "get_clip_start_end_markers", "set_clip_start_marker", "set_clip_end_marker",
+    "get_clip_is_playing", "get_clip_velocity_amount", "set_clip_velocity_amount",
+    # Selection
+    "get_selected_track", "get_selected_scene",
+    # Quantization
+    "get_clip_trigger_quantization", "set_clip_trigger_quantization",
+    "get_midi_recording_quantization", "set_midi_recording_quantization",
+    # Song properties (additional)
+    "get_groove_amount", "set_groove_amount", "get_signature", "set_signature",
+    # Exclusive controls
+    "get_exclusive_arm", "set_exclusive_arm", "get_exclusive_solo", "set_exclusive_solo",
+    # Transport (additional)
+    "continue_playing", "tap_tempo", "stop_all_clips",
+    # Return track management
+    "create_return_track", "delete_return_track",
+    # Multi-track operations
+    "solo_exclusive", "unsolo_all", "unmute_all", "unarm_all",
+    # Device movement
+    "move_device_left", "move_device_right",
+    # Cue point jumping
+    "jump_to_cue_point", "jump_to_prev_cue", "jump_to_next_cue",
 }
 
 # ============================================================================
