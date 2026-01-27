@@ -440,6 +440,40 @@ def set_track_arm(ctx: Context, track_index: int, arm: bool) -> str:
         return f"Error setting track arm: {str(e)}"
 
 @mcp.tool()
+def set_track_volume(ctx: Context, track_index: int, volume: float) -> str:
+    """
+    Set the volume of a track.
+
+    Parameters:
+    - track_index: The index of the track
+    - volume: Volume level from 0.0 (silent) to 1.0 (unity gain). 0.85 is Ableton's default.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_track_volume", {"track_index": track_index, "volume": volume})
+        return f"Track {track_index} volume set to {result.get('volume', volume):.2f}"
+    except Exception as e:
+        logger.error(f"Error setting track volume: {str(e)}")
+        return f"Error setting track volume: {str(e)}"
+
+@mcp.tool()
+def set_track_pan(ctx: Context, track_index: int, pan: float) -> str:
+    """
+    Set the panning of a track.
+
+    Parameters:
+    - track_index: The index of the track
+    - pan: Pan position from -1.0 (full left) to 1.0 (full right). 0.0 is center.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_track_pan", {"track_index": track_index, "pan": pan})
+        return f"Track {track_index} pan set to {result.get('panning', pan):.2f}"
+    except Exception as e:
+        logger.error(f"Error setting track pan: {str(e)}")
+        return f"Error setting track pan: {str(e)}"
+
+@mcp.tool()
 def create_clip(ctx: Context, track_index: int, clip_index: int, length: float = 4.0) -> str:
     """
     Create a new MIDI clip in the specified track and clip slot.

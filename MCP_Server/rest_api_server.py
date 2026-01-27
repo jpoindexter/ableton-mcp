@@ -138,6 +138,12 @@ class TrackBoolRequest(BaseModel):
     track_index: int
     value: bool
 
+class TrackVolumeRequest(BaseModel):
+    volume: float  # 0.0 to 1.0
+
+class TrackPanRequest(BaseModel):
+    pan: float  # -1.0 to 1.0
+
 class TrackColorRequest(BaseModel):
     track_index: int
     color: int
@@ -269,13 +275,9 @@ class QuantizeRequest(BaseModel):
     strength: Optional[float] = 1.0
 
 class HumanizeTimingRequest(BaseModel):
-    track_index: int
-    clip_index: int
     amount: float
 
 class HumanizeVelocityRequest(BaseModel):
-    track_index: int
-    clip_index: int
     amount: float
 
 class DrumPatternRequest(BaseModel):
@@ -397,6 +399,14 @@ def set_track_solo(track_index: int, req: TrackBoolRequest):
 @app.put("/api/tracks/{track_index}/arm")
 def set_track_arm(track_index: int, req: TrackBoolRequest):
     return ableton.send_command("set_track_arm", {"track_index": track_index, "arm": req.value})
+
+@app.put("/api/tracks/{track_index}/volume")
+def set_track_volume(track_index: int, req: TrackVolumeRequest):
+    return ableton.send_command("set_track_volume", {"track_index": track_index, "volume": req.volume})
+
+@app.put("/api/tracks/{track_index}/pan")
+def set_track_pan(track_index: int, req: TrackPanRequest):
+    return ableton.send_command("set_track_pan", {"track_index": track_index, "pan": req.pan})
 
 # Clips
 @app.get("/api/tracks/{track_index}/clips/{clip_index}")
