@@ -115,6 +115,27 @@ ALLOWED_COMMANDS = {
     "create_group_track", "ungroup_tracks", "fold_track", "unfold_track",
     # Groove
     "get_groove_pool", "apply_groove", "commit_groove",
+    # Clip launch and follow actions
+    "get_clip_launch_mode", "set_clip_launch_mode",
+    "get_clip_launch_quantization", "set_clip_launch_quantization",
+    "get_clip_follow_action", "set_clip_follow_action",
+    # Track state
+    "get_track_playing_slot_index", "get_track_fired_slot_index", "get_track_output_meter",
+    # Crossfader
+    "get_crossfader", "set_crossfader", "get_track_crossfade_assign", "set_track_crossfade_assign",
+    # Song properties
+    "get_swing_amount", "set_swing_amount", "get_song_root_note", "set_song_root_note", "get_song_scale",
+    # Audio clip properties
+    "get_clip_ram_mode", "set_clip_ram_mode", "get_audio_clip_file_path",
+    # View settings
+    "get_view_zoom", "get_follow_mode", "set_follow_mode",
+    "get_draw_mode", "set_draw_mode", "get_grid_quantization", "set_grid_quantization",
+    # Drum rack
+    "get_drum_rack_pads", "set_drum_rack_pad_mute", "set_drum_rack_pad_solo",
+    "get_rack_macros", "set_rack_macro",
+    # Punch and arrangement
+    "get_punch_settings", "set_punch_in", "set_punch_out",
+    "get_back_to_arrangement", "trigger_back_to_arrangement",
 }
 
 # ============================================================================

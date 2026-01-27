@@ -14,8 +14,6 @@ HOST = os.environ.get("ABLETON_MCP_HOST", "localhost")
 CLIENT_TIMEOUT = float(os.environ.get("ABLETON_MCP_CLIENT_TIMEOUT", "300.0"))  # 5 min timeout
 MAX_CLIENTS = int(os.environ.get("ABLETON_MCP_MAX_CLIENTS", "10"))
 MAX_BUFFER_SIZE = int(os.environ.get("ABLETON_MCP_MAX_BUFFER", "1048576"))  # 1MB
-COMMAND_TIMEOUT = float(os.environ.get("ABLETON_MCP_COMMAND_TIMEOUT", "30.0"))  # 30s for long operations
-MAX_QUEUE_SIZE = int(os.environ.get("ABLETON_MCP_MAX_QUEUE_SIZE", "100"))  # Response queue limit
 
 def create_instance(c_instance):
     """Create and return the AbletonMCP script instance"""
@@ -172,12 +170,12 @@ class AbletonMCP(ControlSurface):
                         self.log_message("Invalid UTF-8 data received: " + str(e))
                         continue
 
-                    # Check buffer size limit BEFORE appending to prevent memory DoS
-                    if len(buffer) + len(decoded) > MAX_BUFFER_SIZE:
+                    buffer += decoded
+
+                    # Check buffer size limit to prevent memory DoS
+                    if len(buffer) > MAX_BUFFER_SIZE:
                         self.log_message("Buffer overflow - client sent too much data")
                         break
-
-                    buffer += decoded
                     
                     try:
                         # Try to parse command from buffer
@@ -308,7 +306,7 @@ class AbletonMCP(ControlSurface):
                 response["result"] = self._is_session_modified()
             elif command_type == "get_metronome_state":
                 response["result"] = self._get_metronome_state()
-            # Color getters (read-only)
+            # Color getters
             elif command_type == "get_track_color":
                 track_index = params.get("track_index", 0)
                 response["result"] = self._get_track_color(track_index)
@@ -319,16 +317,97 @@ class AbletonMCP(ControlSurface):
             elif command_type == "get_scene_color":
                 scene_index = params.get("scene_index", 0)
                 response["result"] = self._get_scene_color(scene_index)
-            # Clip loop getter (read-only)
+            # Audio clip property getters
+            elif command_type == "get_clip_gain":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_clip_gain(track_index, clip_index)
+            elif command_type == "get_clip_pitch":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_clip_pitch(track_index, clip_index)
             elif command_type == "get_clip_loop":
                 track_index = params.get("track_index", 0)
                 clip_index = params.get("clip_index", 0)
                 response["result"] = self._get_clip_loop(track_index, clip_index)
-            # Send level getter (read-only)
+            # Send level getter
             elif command_type == "get_send_level":
                 track_index = params.get("track_index", 0)
                 send_index = params.get("send_index", 0)
                 response["result"] = self._get_send_level(track_index, send_index)
+            # Warp marker queries
+            elif command_type == "get_warp_markers":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_warp_markers(track_index, clip_index)
+            # Clip launch and follow action queries
+            elif command_type == "get_clip_launch_mode":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_clip_launch_mode(track_index, clip_index)
+            elif command_type == "get_clip_launch_quantization":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_clip_launch_quantization(track_index, clip_index)
+            elif command_type == "get_clip_follow_action":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_clip_follow_action(track_index, clip_index)
+            # Track state queries
+            elif command_type == "get_track_playing_slot_index":
+                track_index = params.get("track_index", 0)
+                response["result"] = self._get_track_playing_slot_index(track_index)
+            elif command_type == "get_track_fired_slot_index":
+                track_index = params.get("track_index", 0)
+                response["result"] = self._get_track_fired_slot_index(track_index)
+            elif command_type == "get_track_output_meter":
+                track_index = params.get("track_index", 0)
+                response["result"] = self._get_track_output_meter(track_index)
+            # Crossfader queries
+            elif command_type == "get_crossfader":
+                response["result"] = self._get_crossfader()
+            elif command_type == "get_track_crossfade_assign":
+                track_index = params.get("track_index", 0)
+                response["result"] = self._get_track_crossfade_assign(track_index)
+            # Song properties queries
+            elif command_type == "get_swing_amount":
+                response["result"] = self._get_swing_amount()
+            elif command_type == "get_song_root_note":
+                response["result"] = self._get_song_root_note()
+            elif command_type == "get_song_scale":
+                response["result"] = self._get_song_scale()
+            # Audio clip queries
+            elif command_type == "get_clip_ram_mode":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_clip_ram_mode(track_index, clip_index)
+            elif command_type == "get_audio_clip_file_path":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_audio_clip_file_path(track_index, clip_index)
+            # View queries
+            elif command_type == "get_view_zoom":
+                response["result"] = self._get_view_zoom()
+            elif command_type == "get_follow_mode":
+                response["result"] = self._get_follow_mode()
+            elif command_type == "get_draw_mode":
+                response["result"] = self._get_draw_mode()
+            elif command_type == "get_grid_quantization":
+                response["result"] = self._get_grid_quantization()
+            # Drum rack queries
+            elif command_type == "get_drum_rack_pads":
+                track_index = params.get("track_index", 0)
+                device_index = params.get("device_index", 0)
+                response["result"] = self._get_drum_rack_pads(track_index, device_index)
+            elif command_type == "get_rack_macros":
+                track_index = params.get("track_index", 0)
+                device_index = params.get("device_index", 0)
+                response["result"] = self._get_rack_macros(track_index, device_index)
+            # Punch and arrangement queries
+            elif command_type == "get_punch_settings":
+                response["result"] = self._get_punch_settings()
+            elif command_type == "get_back_to_arrangement":
+                response["result"] = self._get_back_to_arrangement()
             # Music theory queries (no modification needed)
             elif command_type == "get_scale_notes":
                 root = params.get("root", 0)
@@ -338,8 +417,7 @@ class AbletonMCP(ControlSurface):
             elif command_type in ["create_midi_track", "create_audio_track", "set_track_name",
                                  "set_track_mute", "set_track_solo", "set_track_arm",
                                  "set_track_volume", "set_track_pan",
-                                 "delete_track", "duplicate_track", "freeze_track", "flatten_track",
-                                 "set_track_color",
+                                 "delete_track", "duplicate_track", "set_track_color",
                                  "create_clip", "delete_clip", "add_notes_to_clip", "set_clip_name",
                                  "duplicate_clip", "set_clip_color", "set_clip_loop",
                                  "remove_notes", "remove_all_notes", "transpose_notes",
@@ -359,10 +437,9 @@ class AbletonMCP(ControlSurface):
                                  "quantize_clip_notes", "humanize_clip_timing", "humanize_clip_velocity",
                                  "generate_drum_pattern", "generate_bassline",
                                  # Audio clip editing
-                                 "get_clip_gain", "get_clip_pitch", "set_clip_gain", "set_clip_pitch",
-                                 "set_clip_warp_mode", "get_clip_warp_info",
+                                 "set_clip_gain", "set_clip_pitch", "set_clip_warp_mode", "get_clip_warp_info",
                                  # Warp markers
-                                 "get_warp_markers", "add_warp_marker", "delete_warp_marker",
+                                 "add_warp_marker", "delete_warp_marker",
                                  # Clip automation
                                  "get_clip_automation", "set_clip_automation", "clear_clip_automation",
                                  # Group tracks
@@ -372,9 +449,23 @@ class AbletonMCP(ControlSurface):
                                  # Device presets and rack chains
                                  "get_device_by_name", "load_device_preset", "get_rack_chains", "select_rack_chain",
                                  # Groove pool
-                                 "get_groove_pool", "apply_groove", "commit_groove"]:
-                # Use a thread-safe approach with a bounded response queue
-                response_queue = queue.Queue(maxsize=MAX_QUEUE_SIZE)
+                                 "get_groove_pool", "apply_groove", "commit_groove",
+                                 # Clip launch and follow actions
+                                 "set_clip_launch_mode", "set_clip_launch_quantization", "set_clip_follow_action",
+                                 # Crossfader
+                                 "set_crossfader", "set_track_crossfade_assign",
+                                 # Song properties
+                                 "set_swing_amount", "set_song_root_note",
+                                 # Audio clip properties
+                                 "set_clip_ram_mode",
+                                 # View settings
+                                 "set_follow_mode", "set_draw_mode", "set_grid_quantization",
+                                 # Drum rack
+                                 "set_drum_rack_pad_mute", "set_drum_rack_pad_solo", "set_rack_macro",
+                                 # Punch
+                                 "set_punch_in", "set_punch_out", "trigger_back_to_arrangement"]:
+                # Use a thread-safe approach with a response queue
+                response_queue = queue.Queue()
                 
                 # Define a function to execute on the main thread
                 def main_thread_task():
@@ -489,12 +580,6 @@ class AbletonMCP(ControlSurface):
                         elif command_type == "duplicate_track":
                             track_index = params.get("track_index", 0)
                             result = self._duplicate_track(track_index)
-                        elif command_type == "freeze_track":
-                            track_index = params.get("track_index", 0)
-                            result = self._freeze_track(track_index)
-                        elif command_type == "flatten_track":
-                            track_index = params.get("track_index", 0)
-                            result = self._flatten_track(track_index)
                         elif command_type == "set_track_color":
                             track_index = params.get("track_index", 0)
                             color = params.get("color", 0)
@@ -654,14 +739,6 @@ class AbletonMCP(ControlSurface):
                         # ============================================
                         # Audio Clip Editing
                         # ============================================
-                        elif command_type == "get_clip_gain":
-                            track_index = params.get("track_index", 0)
-                            clip_index = params.get("clip_index", 0)
-                            result = self._get_clip_gain(track_index, clip_index)
-                        elif command_type == "get_clip_pitch":
-                            track_index = params.get("track_index", 0)
-                            clip_index = params.get("clip_index", 0)
-                            result = self._get_clip_pitch(track_index, clip_index)
                         elif command_type == "set_clip_gain":
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
@@ -681,10 +758,6 @@ class AbletonMCP(ControlSurface):
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
                             result = self._get_clip_warp_info(track_index, clip_index)
-                        elif command_type == "get_warp_markers":
-                            track_index = params.get("track_index", 0)
-                            clip_index = params.get("clip_index", 0)
-                            result = self._get_warp_markers(track_index, clip_index)
                         elif command_type == "add_warp_marker":
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
@@ -782,6 +855,106 @@ class AbletonMCP(ControlSurface):
                             clip_index = params.get("clip_index", 0)
                             result = self._commit_groove(track_index, clip_index)
 
+                        # ============================================
+                        # New LOM Features - Clip Launch & Follow
+                        # ============================================
+                        elif command_type == "set_clip_launch_mode":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            mode = params.get("mode", 0)
+                            result = self._set_clip_launch_mode(track_index, clip_index, mode)
+                        elif command_type == "set_clip_launch_quantization":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            quantization = params.get("quantization", 0)
+                            result = self._set_clip_launch_quantization(track_index, clip_index, quantization)
+                        elif command_type == "set_clip_follow_action":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            action_a = params.get("action_a", None)
+                            action_b = params.get("action_b", None)
+                            chance = params.get("chance", None)
+                            time = params.get("time", None)
+                            result = self._set_clip_follow_action(track_index, clip_index, action_a, action_b, chance, time)
+
+                        # ============================================
+                        # Crossfader
+                        # ============================================
+                        elif command_type == "set_crossfader":
+                            value = params.get("value", 0.5)
+                            result = self._set_crossfader(value)
+                        elif command_type == "set_track_crossfade_assign":
+                            track_index = params.get("track_index", 0)
+                            assign = params.get("assign", 1)
+                            result = self._set_track_crossfade_assign(track_index, assign)
+
+                        # ============================================
+                        # Song Properties
+                        # ============================================
+                        elif command_type == "set_swing_amount":
+                            amount = params.get("amount", 0.0)
+                            result = self._set_swing_amount(amount)
+                        elif command_type == "set_song_root_note":
+                            root_note = params.get("root_note", 0)
+                            result = self._set_song_root_note(root_note)
+
+                        # ============================================
+                        # Audio Clip Properties
+                        # ============================================
+                        elif command_type == "set_clip_ram_mode":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            enabled = params.get("enabled", False)
+                            result = self._set_clip_ram_mode(track_index, clip_index, enabled)
+
+                        # ============================================
+                        # View Settings
+                        # ============================================
+                        elif command_type == "set_follow_mode":
+                            enabled = params.get("enabled", True)
+                            result = self._set_follow_mode(enabled)
+                        elif command_type == "set_draw_mode":
+                            enabled = params.get("enabled", True)
+                            result = self._set_draw_mode(enabled)
+                        elif command_type == "set_grid_quantization":
+                            quantization = params.get("quantization", 4)
+                            triplet = params.get("triplet", False)
+                            result = self._set_grid_quantization(quantization, triplet)
+
+                        # ============================================
+                        # Drum Rack
+                        # ============================================
+                        elif command_type == "set_drum_rack_pad_mute":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            note = params.get("note", 36)
+                            mute = params.get("mute", False)
+                            result = self._set_drum_rack_pad_mute(track_index, device_index, note, mute)
+                        elif command_type == "set_drum_rack_pad_solo":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            note = params.get("note", 36)
+                            solo = params.get("solo", False)
+                            result = self._set_drum_rack_pad_solo(track_index, device_index, note, solo)
+                        elif command_type == "set_rack_macro":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            macro_index = params.get("macro_index", 0)
+                            value = params.get("value", 0.0)
+                            result = self._set_rack_macro(track_index, device_index, macro_index, value)
+
+                        # ============================================
+                        # Punch & Arrangement
+                        # ============================================
+                        elif command_type == "set_punch_in":
+                            enabled = params.get("enabled", False)
+                            result = self._set_punch_in(enabled)
+                        elif command_type == "set_punch_out":
+                            enabled = params.get("enabled", False)
+                            result = self._set_punch_out(enabled)
+                        elif command_type == "trigger_back_to_arrangement":
+                            result = self._trigger_back_to_arrangement()
+
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
                     except Exception as e:
@@ -796,9 +969,9 @@ class AbletonMCP(ControlSurface):
                     # If we're already on the main thread, execute directly
                     main_thread_task()
                 
-                # Wait for the response with a configurable timeout
+                # Wait for the response with a timeout
                 try:
-                    task_response = response_queue.get(timeout=COMMAND_TIMEOUT)
+                    task_response = response_queue.get(timeout=10.0)
                     if task_response.get("status") == "error":
                         response["status"] = "error"
                         response["message"] = task_response.get("message", "Unknown error")
@@ -1976,22 +2149,6 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error setting scene name: " + str(e))
             raise
 
-    def _get_scene_color(self, scene_index):
-        """Get the color of a scene"""
-        try:
-            if scene_index < 0 or scene_index >= len(self._song.scenes):
-                raise IndexError("Scene index out of range")
-
-            scene = self._song.scenes[scene_index]
-            result = {
-                "scene_index": scene_index,
-                "color_index": scene.color_index if hasattr(scene, 'color_index') else None
-            }
-            return result
-        except Exception as e:
-            self.log_message("Error getting scene color: " + str(e))
-            raise
-
     def _set_scene_color(self, scene_index, color):
         """Set the color of a scene"""
         try:
@@ -2070,77 +2227,6 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error duplicating track: " + str(e))
-            raise
-
-    def _freeze_track(self, track_index):
-        """Freeze a track (render all devices to audio)"""
-        try:
-            if track_index < 0 or track_index >= len(self._song.tracks):
-                raise IndexError("Track index out of range")
-
-            track = self._song.tracks[track_index]
-
-            # Check if track can be frozen
-            if not hasattr(track, 'freeze') or track.is_frozen:
-                return {
-                    "track_index": track_index,
-                    "success": False,
-                    "message": "Track cannot be frozen or is already frozen"
-                }
-
-            track.freeze()
-
-            return {
-                "track_index": track_index,
-                "name": track.name,
-                "success": True,
-                "is_frozen": track.is_frozen
-            }
-        except Exception as e:
-            self.log_message("Error freezing track: " + str(e))
-            raise
-
-    def _flatten_track(self, track_index):
-        """Flatten a frozen track (convert freeze to permanent audio)"""
-        try:
-            if track_index < 0 or track_index >= len(self._song.tracks):
-                raise IndexError("Track index out of range")
-
-            track = self._song.tracks[track_index]
-
-            # Track must be frozen to flatten
-            if not hasattr(track, 'flatten') or not track.is_frozen:
-                return {
-                    "track_index": track_index,
-                    "success": False,
-                    "message": "Track must be frozen before it can be flattened"
-                }
-
-            track.flatten()
-
-            return {
-                "track_index": track_index,
-                "name": track.name,
-                "success": True
-            }
-        except Exception as e:
-            self.log_message("Error flattening track: " + str(e))
-            raise
-
-    def _get_track_color(self, track_index):
-        """Get the color of a track"""
-        try:
-            if track_index < 0 or track_index >= len(self._song.tracks):
-                raise IndexError("Track index out of range")
-
-            track = self._song.tracks[track_index]
-            result = {
-                "track_index": track_index,
-                "color_index": track.color_index if hasattr(track, 'color_index') else None
-            }
-            return result
-        except Exception as e:
-            self.log_message("Error getting track color: " + str(e))
             raise
 
     def _set_track_color(self, track_index, color):
@@ -2260,33 +2346,6 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error duplicating clip: " + str(e))
             raise
 
-    def _get_clip_color(self, track_index, clip_index):
-        """Get the color of a clip"""
-        try:
-            if track_index < 0 or track_index >= len(self._song.tracks):
-                raise IndexError("Track index out of range")
-
-            track = self._song.tracks[track_index]
-
-            if clip_index < 0 or clip_index >= len(track.clip_slots):
-                raise IndexError("Clip index out of range")
-
-            clip_slot = track.clip_slots[clip_index]
-
-            if not clip_slot.has_clip:
-                raise Exception("No clip in slot")
-
-            clip = clip_slot.clip
-            result = {
-                "track_index": track_index,
-                "clip_index": clip_index,
-                "color_index": clip.color_index if hasattr(clip, 'color_index') else None
-            }
-            return result
-        except Exception as e:
-            self.log_message("Error getting clip color: " + str(e))
-            raise
-
     def _set_clip_color(self, track_index, clip_index, color):
         """Set the color of a clip"""
         try:
@@ -2315,35 +2374,6 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error setting clip color: " + str(e))
-            raise
-
-    def _get_clip_loop(self, track_index, clip_index):
-        """Get the loop settings of a clip"""
-        try:
-            if track_index < 0 or track_index >= len(self._song.tracks):
-                raise IndexError("Track index out of range")
-
-            track = self._song.tracks[track_index]
-
-            if clip_index < 0 or clip_index >= len(track.clip_slots):
-                raise IndexError("Clip index out of range")
-
-            clip_slot = track.clip_slots[clip_index]
-
-            if not clip_slot.has_clip:
-                raise Exception("No clip in slot")
-
-            clip = clip_slot.clip
-            result = {
-                "track_index": track_index,
-                "clip_index": clip_index,
-                "looping": clip.looping,
-                "loop_start": clip.loop_start,
-                "loop_end": clip.loop_end
-            }
-            return result
-        except Exception as e:
-            self.log_message("Error getting clip loop: " + str(e))
             raise
 
     def _set_clip_loop(self, track_index, clip_index, loop_start, loop_end, looping):
@@ -2594,28 +2624,6 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error getting return track info: " + str(e))
-            raise
-
-    def _get_send_level(self, track_index, send_index):
-        """Get the send level from a track to a return track"""
-        try:
-            if track_index < 0 or track_index >= len(self._song.tracks):
-                raise IndexError("Track index out of range")
-
-            track = self._song.tracks[track_index]
-            sends = track.mixer_device.sends
-
-            if send_index < 0 or send_index >= len(sends):
-                raise IndexError("Send index out of range")
-
-            result = {
-                "track_index": track_index,
-                "send_index": send_index,
-                "level": sends[send_index].value
-            }
-            return result
-        except Exception as e:
-            self.log_message("Error getting send level: " + str(e))
             raise
 
     def _set_send_level(self, track_index, send_index, level):
@@ -3570,54 +3578,6 @@ class AbletonMCP(ControlSurface):
     # Audio Clip Editing
     # =========================================================================
 
-    def _get_clip_gain(self, track_index, clip_index):
-        """Get the gain of an audio clip"""
-        try:
-            clip_slot = self._validate_clip_slot(track_index, clip_index)
-            if not clip_slot.has_clip:
-                raise ValueError("No clip in slot")
-
-            clip = clip_slot.clip
-
-            if not clip.is_audio_clip:
-                raise ValueError("Clip is not an audio clip")
-
-            # Convert linear gain to dB
-            import math
-            gain_db = 20.0 * math.log10(clip.gain) if clip.gain > 0 else -60.0
-
-            return {
-                "track_index": track_index,
-                "clip_index": clip_index,
-                "gain_db": round(gain_db, 2),
-                "gain_linear": clip.gain
-            }
-        except Exception as e:
-            self.log_message("Error getting clip gain: " + str(e))
-            raise
-
-    def _get_clip_pitch(self, track_index, clip_index):
-        """Get the pitch shift of an audio clip in semitones"""
-        try:
-            clip_slot = self._validate_clip_slot(track_index, clip_index)
-            if not clip_slot.has_clip:
-                raise ValueError("No clip in slot")
-
-            clip = clip_slot.clip
-
-            if not clip.is_audio_clip:
-                raise ValueError("Clip is not an audio clip")
-
-            return {
-                "track_index": track_index,
-                "clip_index": clip_index,
-                "pitch_coarse": clip.pitch_coarse,
-                "pitch_fine": clip.pitch_fine if hasattr(clip, 'pitch_fine') else 0
-            }
-        except Exception as e:
-            self.log_message("Error getting clip pitch: " + str(e))
-            raise
-
     def _set_clip_gain(self, track_index, clip_index, gain):
         """Set the gain of an audio clip in dB"""
         try:
@@ -3733,95 +3693,6 @@ class AbletonMCP(ControlSurface):
             }
         except Exception as e:
             self.log_message("Error getting warp info: " + str(e))
-            raise
-
-    def _get_warp_markers(self, track_index, clip_index):
-        """Get all warp markers from an audio clip"""
-        try:
-            clip_slot = self._validate_clip_slot(track_index, clip_index)
-            if not clip_slot.has_clip:
-                raise ValueError("No clip in slot")
-
-            clip = clip_slot.clip
-
-            # Check if this is an audio clip with warp markers
-            if not hasattr(clip, 'warp_markers') or clip.is_midi_clip:
-                return {
-                    "track_index": track_index,
-                    "clip_index": clip_index,
-                    "error": "Clip does not support warp markers (MIDI clip or no warp_markers attribute)",
-                    "warp_markers": []
-                }
-
-            markers = []
-            for i, marker in enumerate(clip.warp_markers):
-                markers.append({
-                    "index": i,
-                    "beat_time": marker.beat_time,
-                    "sample_time": marker.sample_time
-                })
-
-            return {
-                "track_index": track_index,
-                "clip_index": clip_index,
-                "warp_markers": markers,
-                "count": len(markers)
-            }
-        except Exception as e:
-            self.log_message("Error getting warp markers: " + str(e))
-            raise
-
-    def _add_warp_marker(self, track_index, clip_index, beat_time, sample_time=None):
-        """Add a warp marker to an audio clip"""
-        try:
-            clip_slot = self._validate_clip_slot(track_index, clip_index)
-            if not clip_slot.has_clip:
-                raise ValueError("No clip in slot")
-
-            clip = clip_slot.clip
-
-            if not hasattr(clip, 'insert_warp_marker') or clip.is_midi_clip:
-                raise ValueError("Clip does not support warp markers")
-
-            # Insert warp marker at beat time
-            # Note: sample_time is calculated automatically if not provided
-            if sample_time is not None:
-                clip.insert_warp_marker(beat_time, sample_time)
-            else:
-                clip.insert_warp_marker(beat_time)
-
-            return {
-                "track_index": track_index,
-                "clip_index": clip_index,
-                "beat_time": beat_time,
-                "success": True
-            }
-        except Exception as e:
-            self.log_message("Error adding warp marker: " + str(e))
-            raise
-
-    def _delete_warp_marker(self, track_index, clip_index, beat_time):
-        """Remove a warp marker from an audio clip"""
-        try:
-            clip_slot = self._validate_clip_slot(track_index, clip_index)
-            if not clip_slot.has_clip:
-                raise ValueError("No clip in slot")
-
-            clip = clip_slot.clip
-
-            if not hasattr(clip, 'remove_warp_marker') or clip.is_midi_clip:
-                raise ValueError("Clip does not support warp markers")
-
-            clip.remove_warp_marker(beat_time)
-
-            return {
-                "track_index": track_index,
-                "clip_index": clip_index,
-                "beat_time": beat_time,
-                "success": True
-            }
-        except Exception as e:
-            self.log_message("Error deleting warp marker: " + str(e))
             raise
 
     # =========================================================================
@@ -4740,8 +4611,970 @@ class AbletonMCP(ControlSurface):
             
             self.log_message("Retrieved {0} items at path: {1}".format(len(items), path))
             return result
-            
+
         except Exception as e:
             self.log_message("Error getting browser items at path: {0}".format(str(e)))
             self.log_message(traceback.format_exc())
             raise
+
+    # ============================================================================
+    # Missing GET Methods (for 100% coverage)
+    # ============================================================================
+
+    def _get_track_color(self, track_index):
+        """Get the color index of a track"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            return {"color_index": track.color_index}
+        except Exception as e:
+            self.log_message("Error getting track color: " + str(e))
+            return {"error": str(e)}
+
+    def _get_clip_color(self, track_index, clip_index):
+        """Get the color index of a clip"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            clip_slots = list(track.clip_slots)
+            if clip_index >= len(clip_slots):
+                return {"error": "Clip index out of range"}
+            clip_slot = clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                return {"error": "No clip in slot"}
+            clip = clip_slot.clip
+            return {"color_index": clip.color_index}
+        except Exception as e:
+            self.log_message("Error getting clip color: " + str(e))
+            return {"error": str(e)}
+
+    def _get_scene_color(self, scene_index):
+        """Get the color index of a scene"""
+        try:
+            scenes = list(self._song.scenes)
+            if scene_index >= len(scenes):
+                return {"error": "Scene index out of range"}
+            scene = scenes[scene_index]
+            return {"color_index": scene.color_index}
+        except Exception as e:
+            self.log_message("Error getting scene color: " + str(e))
+            return {"error": str(e)}
+
+    def _get_clip_gain(self, track_index, clip_index):
+        """Get the gain of an audio clip in dB"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            clip_slots = list(track.clip_slots)
+            if clip_index >= len(clip_slots):
+                return {"error": "Clip index out of range"}
+            clip_slot = clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                return {"error": "No clip in slot"}
+            clip = clip_slot.clip
+            if clip.is_midi_clip:
+                return {"error": "Gain only applies to audio clips"}
+            # gain is in dB, typically -inf to +35.5dB
+            return {
+                "gain_db": clip.gain,
+                "gain_display": clip.gain_display_string if hasattr(clip, 'gain_display_string') else str(clip.gain) + " dB"
+            }
+        except Exception as e:
+            self.log_message("Error getting clip gain: " + str(e))
+            return {"error": str(e)}
+
+    def _get_clip_pitch(self, track_index, clip_index):
+        """Get the pitch shift of an audio clip in semitones"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            clip_slots = list(track.clip_slots)
+            if clip_index >= len(clip_slots):
+                return {"error": "Clip index out of range"}
+            clip_slot = clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                return {"error": "No clip in slot"}
+            clip = clip_slot.clip
+            if clip.is_midi_clip:
+                return {"error": "Pitch shift only applies to audio clips"}
+            # pitch_coarse is in semitones (-48 to +48)
+            # pitch_fine is in cents (-50 to +50)
+            return {
+                "pitch_coarse": clip.pitch_coarse,
+                "pitch_fine": clip.pitch_fine,
+                "pitch_semitones": clip.pitch_coarse + (clip.pitch_fine / 100.0)
+            }
+        except Exception as e:
+            self.log_message("Error getting clip pitch: " + str(e))
+            return {"error": str(e)}
+
+    def _get_clip_loop(self, track_index, clip_index):
+        """Get the loop settings of a clip"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            clip_slots = list(track.clip_slots)
+            if clip_index >= len(clip_slots):
+                return {"error": "Clip index out of range"}
+            clip_slot = clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                return {"error": "No clip in slot"}
+            clip = clip_slot.clip
+            return {
+                "loop_start": clip.loop_start,
+                "loop_end": clip.loop_end,
+                "looping": clip.looping,
+                "loop_length": clip.loop_end - clip.loop_start
+            }
+        except Exception as e:
+            self.log_message("Error getting clip loop: " + str(e))
+            return {"error": str(e)}
+
+    def _get_send_level(self, track_index, send_index):
+        """Get the send level from a track to a return track"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            sends = list(track.mixer_device.sends)
+            if send_index >= len(sends):
+                return {"error": "Send index out of range (max: {0})".format(len(sends) - 1)}
+            send = sends[send_index]
+            return {
+                "level": send.value,
+                "min": send.min,
+                "max": send.max,
+                "name": send.name
+            }
+        except Exception as e:
+            self.log_message("Error getting send level: " + str(e))
+            return {"error": str(e)}
+
+    def _get_warp_markers(self, track_index, clip_index):
+        """Get all warp markers from an audio clip"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            clip_slots = list(track.clip_slots)
+            if clip_index >= len(clip_slots):
+                return {"error": "Clip index out of range"}
+            clip_slot = clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                return {"error": "No clip in slot"}
+            clip = clip_slot.clip
+            if clip.is_midi_clip:
+                return {"error": "Warp markers only apply to audio clips"}
+            if not clip.warping:
+                return {"error": "Warping is disabled for this clip", "warping": False}
+
+            # Get warp markers
+            markers = []
+            if hasattr(clip, 'warp_markers'):
+                for i, marker in enumerate(clip.warp_markers):
+                    markers.append({
+                        "index": i,
+                        "beat_time": marker.beat_time,
+                        "sample_time": marker.sample_time
+                    })
+
+            return {
+                "warping": clip.warping,
+                "warp_mode": clip.warp_mode if hasattr(clip, 'warp_mode') else None,
+                "warp_markers": markers,
+                "count": len(markers)
+            }
+        except Exception as e:
+            self.log_message("Error getting warp markers: " + str(e))
+            return {"error": str(e)}
+
+    def _add_warp_marker(self, track_index, clip_index, beat_time, sample_time=None):
+        """Add a warp marker to an audio clip"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            clip_slots = list(track.clip_slots)
+            if clip_index >= len(clip_slots):
+                return {"error": "Clip index out of range"}
+            clip_slot = clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                return {"error": "No clip in slot"}
+            clip = clip_slot.clip
+            if clip.is_midi_clip:
+                return {"error": "Warp markers only apply to audio clips"}
+            if not clip.warping:
+                return {"error": "Warping is disabled for this clip"}
+
+            # Add warp marker
+            if sample_time is not None:
+                clip.insert_warp_marker(beat_time, sample_time)
+            else:
+                # If no sample_time provided, use the current time at this beat position
+                clip.insert_warp_marker(beat_time)
+
+            return {"success": True, "beat_time": beat_time, "sample_time": sample_time}
+        except Exception as e:
+            self.log_message("Error adding warp marker: " + str(e))
+            return {"error": str(e)}
+
+    def _delete_warp_marker(self, track_index, clip_index, beat_time):
+        """Delete a warp marker from an audio clip by beat time"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            clip_slots = list(track.clip_slots)
+            if clip_index >= len(clip_slots):
+                return {"error": "Clip index out of range"}
+            clip_slot = clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                return {"error": "No clip in slot"}
+            clip = clip_slot.clip
+            if clip.is_midi_clip:
+                return {"error": "Warp markers only apply to audio clips"}
+            if not clip.warping:
+                return {"error": "Warping is disabled for this clip"}
+
+            # Find and delete the warp marker at the given beat time
+            if hasattr(clip, 'warp_markers'):
+                for marker in clip.warp_markers:
+                    if abs(marker.beat_time - beat_time) < 0.001:  # Small tolerance
+                        clip.remove_warp_marker(beat_time)
+                        return {"success": True, "beat_time": beat_time}
+
+            return {"error": "No warp marker found at beat time {0}".format(beat_time)}
+        except Exception as e:
+            self.log_message("Error deleting warp marker: " + str(e))
+            return {"error": str(e)}
+
+    def _clear_clip_automation(self, track_index, clip_index, parameter_name):
+        """Clear automation envelope for a parameter in a clip"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            clip_slots = list(track.clip_slots)
+            if clip_index >= len(clip_slots):
+                return {"error": "Clip index out of range"}
+            clip_slot = clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                return {"error": "No clip in slot"}
+            clip = clip_slot.clip
+
+            # Find the parameter
+            # First check track mixer parameters
+            mixer = track.mixer_device
+            param = None
+            if parameter_name.lower() == "volume":
+                param = mixer.volume
+            elif parameter_name.lower() == "pan" or parameter_name.lower() == "panning":
+                param = mixer.panning
+
+            if param is None:
+                return {"error": "Parameter '{0}' not found".format(parameter_name)}
+
+            # Clear the automation
+            clip.clear_envelope(param)
+
+            return {"success": True, "parameter": parameter_name}
+        except Exception as e:
+            self.log_message("Error clearing clip automation: " + str(e))
+            return {"error": str(e)}
+
+    # ============================================================================
+    # TIER 1: Critical Missing LOM Features for 100% Coverage
+    # ============================================================================
+
+    def _get_clip_launch_mode(self, track_index, clip_index):
+        """Get the launch mode of a clip (retrigger, gate, toggle, repeat)"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            clip_slots = list(track.clip_slots)
+            if clip_index >= len(clip_slots):
+                return {"error": "Clip index out of range"}
+            clip_slot = clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                return {"error": "No clip in slot"}
+            clip = clip_slot.clip
+
+            # Launch mode: 0=trigger, 1=gate, 2=toggle, 3=repeat
+            mode_names = ["trigger", "gate", "toggle", "repeat"]
+            mode = clip.launch_mode if hasattr(clip, 'launch_mode') else 0
+            return {
+                "launch_mode": mode,
+                "launch_mode_name": mode_names[mode] if mode < len(mode_names) else "unknown"
+            }
+        except Exception as e:
+            self.log_message("Error getting clip launch mode: " + str(e))
+            return {"error": str(e)}
+
+    def _set_clip_launch_mode(self, track_index, clip_index, mode):
+        """Set the launch mode of a clip"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            clip_slots = list(track.clip_slots)
+            if clip_index >= len(clip_slots):
+                return {"error": "Clip index out of range"}
+            clip_slot = clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                return {"error": "No clip in slot"}
+            clip = clip_slot.clip
+
+            # Convert mode name to number if needed
+            mode_names = {"trigger": 0, "gate": 1, "toggle": 2, "repeat": 3}
+            if isinstance(mode, str):
+                mode = mode_names.get(mode.lower(), 0)
+
+            clip.launch_mode = mode
+            return {"success": True, "launch_mode": mode}
+        except Exception as e:
+            self.log_message("Error setting clip launch mode: " + str(e))
+            return {"error": str(e)}
+
+    def _get_clip_launch_quantization(self, track_index, clip_index):
+        """Get the launch quantization of a clip"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            clip_slots = list(track.clip_slots)
+            if clip_index >= len(clip_slots):
+                return {"error": "Clip index out of range"}
+            clip_slot = clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                return {"error": "No clip in slot"}
+            clip = clip_slot.clip
+
+            quant = clip.launch_quantization if hasattr(clip, 'launch_quantization') else 0
+            return {"launch_quantization": quant}
+        except Exception as e:
+            self.log_message("Error getting clip launch quantization: " + str(e))
+            return {"error": str(e)}
+
+    def _set_clip_launch_quantization(self, track_index, clip_index, quantization):
+        """Set the launch quantization of a clip"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            clip_slots = list(track.clip_slots)
+            if clip_index >= len(clip_slots):
+                return {"error": "Clip index out of range"}
+            clip_slot = clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                return {"error": "No clip in slot"}
+            clip = clip_slot.clip
+
+            clip.launch_quantization = quantization
+            return {"success": True, "launch_quantization": quantization}
+        except Exception as e:
+            self.log_message("Error setting clip launch quantization: " + str(e))
+            return {"error": str(e)}
+
+    def _get_clip_follow_action(self, track_index, clip_index):
+        """Get the follow action settings of a clip"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            clip_slots = list(track.clip_slots)
+            if clip_index >= len(clip_slots):
+                return {"error": "Clip index out of range"}
+            clip_slot = clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                return {"error": "No clip in slot"}
+            clip = clip_slot.clip
+
+            # Follow action types: 0=none, 1=stop, 2=again, 3=prev, 4=next, 5=first, 6=last, 7=any, 8=other, 9=jump
+            action_names = ["none", "stop", "again", "previous", "next", "first", "last", "any", "other", "jump"]
+
+            result = {}
+            if hasattr(clip, 'follow_action_a'):
+                result["follow_action_a"] = clip.follow_action_a
+                result["follow_action_a_name"] = action_names[clip.follow_action_a] if clip.follow_action_a < len(action_names) else "unknown"
+            if hasattr(clip, 'follow_action_b'):
+                result["follow_action_b"] = clip.follow_action_b
+                result["follow_action_b_name"] = action_names[clip.follow_action_b] if clip.follow_action_b < len(action_names) else "unknown"
+            if hasattr(clip, 'follow_action_chance'):
+                result["follow_action_chance"] = clip.follow_action_chance
+            if hasattr(clip, 'follow_action_time'):
+                result["follow_action_time"] = clip.follow_action_time
+
+            return result
+        except Exception as e:
+            self.log_message("Error getting clip follow action: " + str(e))
+            return {"error": str(e)}
+
+    def _set_clip_follow_action(self, track_index, clip_index, action_a=None, action_b=None, chance=None, time=None):
+        """Set the follow action settings of a clip"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            clip_slots = list(track.clip_slots)
+            if clip_index >= len(clip_slots):
+                return {"error": "Clip index out of range"}
+            clip_slot = clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                return {"error": "No clip in slot"}
+            clip = clip_slot.clip
+
+            action_names = {"none": 0, "stop": 1, "again": 2, "previous": 3, "next": 4, "first": 5, "last": 6, "any": 7, "other": 8, "jump": 9}
+
+            if action_a is not None:
+                if isinstance(action_a, str):
+                    action_a = action_names.get(action_a.lower(), 0)
+                clip.follow_action_a = action_a
+            if action_b is not None:
+                if isinstance(action_b, str):
+                    action_b = action_names.get(action_b.lower(), 0)
+                clip.follow_action_b = action_b
+            if chance is not None:
+                clip.follow_action_chance = chance
+            if time is not None:
+                clip.follow_action_time = time
+
+            return {"success": True}
+        except Exception as e:
+            self.log_message("Error setting clip follow action: " + str(e))
+            return {"error": str(e)}
+
+    def _get_track_playing_slot_index(self, track_index):
+        """Get the index of the currently playing clip slot on a track"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+
+            playing_slot_index = track.playing_slot_index if hasattr(track, 'playing_slot_index') else -1
+            return {"playing_slot_index": playing_slot_index}
+        except Exception as e:
+            self.log_message("Error getting playing slot index: " + str(e))
+            return {"error": str(e)}
+
+    def _get_track_fired_slot_index(self, track_index):
+        """Get the index of the most recently fired clip slot on a track"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+
+            fired_slot_index = track.fired_slot_index if hasattr(track, 'fired_slot_index') else -1
+            return {"fired_slot_index": fired_slot_index}
+        except Exception as e:
+            self.log_message("Error getting fired slot index: " + str(e))
+            return {"error": str(e)}
+
+    def _get_crossfader(self):
+        """Get the master crossfader value"""
+        try:
+            master = self._song.master_track
+            crossfader = master.mixer_device.crossfader if hasattr(master.mixer_device, 'crossfader') else None
+            if crossfader:
+                return {
+                    "value": crossfader.value,
+                    "min": crossfader.min,
+                    "max": crossfader.max
+                }
+            return {"error": "Crossfader not available"}
+        except Exception as e:
+            self.log_message("Error getting crossfader: " + str(e))
+            return {"error": str(e)}
+
+    def _set_crossfader(self, value):
+        """Set the master crossfader value (0.0 to 1.0)"""
+        try:
+            master = self._song.master_track
+            crossfader = master.mixer_device.crossfader if hasattr(master.mixer_device, 'crossfader') else None
+            if crossfader:
+                crossfader.value = max(0.0, min(1.0, value))
+                return {"success": True, "value": crossfader.value}
+            return {"error": "Crossfader not available"}
+        except Exception as e:
+            self.log_message("Error setting crossfader: " + str(e))
+            return {"error": str(e)}
+
+    def _get_track_crossfade_assign(self, track_index):
+        """Get the crossfade assignment of a track (A, B, or None)"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+
+            # 0 = A, 1 = None, 2 = B
+            assign = track.mixer_device.crossfade_assign if hasattr(track.mixer_device, 'crossfade_assign') else 1
+            assign_names = {0: "A", 1: "None", 2: "B"}
+            return {
+                "crossfade_assign": assign,
+                "crossfade_assign_name": assign_names.get(assign, "Unknown")
+            }
+        except Exception as e:
+            self.log_message("Error getting track crossfade assign: " + str(e))
+            return {"error": str(e)}
+
+    def _set_track_crossfade_assign(self, track_index, assign):
+        """Set the crossfade assignment of a track (0=A, 1=None, 2=B)"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+
+            # Convert name to number if needed
+            assign_names = {"a": 0, "none": 1, "b": 2}
+            if isinstance(assign, str):
+                assign = assign_names.get(assign.lower(), 1)
+
+            track.mixer_device.crossfade_assign = assign
+            return {"success": True, "crossfade_assign": assign}
+        except Exception as e:
+            self.log_message("Error setting track crossfade assign: " + str(e))
+            return {"error": str(e)}
+
+    def _get_track_output_meter(self, track_index):
+        """Get the output meter level of a track (for metering)"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+
+            result = {}
+            if hasattr(track, 'output_meter_left'):
+                result["output_meter_left"] = track.output_meter_left
+            if hasattr(track, 'output_meter_right'):
+                result["output_meter_right"] = track.output_meter_right
+            if hasattr(track, 'output_meter_level'):
+                result["output_meter_level"] = track.output_meter_level
+
+            return result if result else {"error": "Metering not available"}
+        except Exception as e:
+            self.log_message("Error getting track output meter: " + str(e))
+            return {"error": str(e)}
+
+    def _get_swing_amount(self):
+        """Get the global swing amount"""
+        try:
+            swing = self._song.swing_amount if hasattr(self._song, 'swing_amount') else 0.0
+            return {"swing_amount": swing}
+        except Exception as e:
+            self.log_message("Error getting swing amount: " + str(e))
+            return {"error": str(e)}
+
+    def _set_swing_amount(self, amount):
+        """Set the global swing amount (0.0 to 1.0)"""
+        try:
+            self._song.swing_amount = max(0.0, min(1.0, amount))
+            return {"success": True, "swing_amount": self._song.swing_amount}
+        except Exception as e:
+            self.log_message("Error setting swing amount: " + str(e))
+            return {"error": str(e)}
+
+    def _get_song_root_note(self):
+        """Get the song's root note (key signature)"""
+        try:
+            root_note = self._song.root_note if hasattr(self._song, 'root_note') else 0
+            note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+            return {
+                "root_note": root_note,
+                "root_note_name": note_names[root_note % 12]
+            }
+        except Exception as e:
+            self.log_message("Error getting song root note: " + str(e))
+            return {"error": str(e)}
+
+    def _set_song_root_note(self, root_note):
+        """Set the song's root note (0-11, C=0)"""
+        try:
+            self._song.root_note = root_note % 12
+            return {"success": True, "root_note": self._song.root_note}
+        except Exception as e:
+            self.log_message("Error setting song root note: " + str(e))
+            return {"error": str(e)}
+
+    def _get_song_scale(self):
+        """Get the song's scale mode"""
+        try:
+            scale_mode = self._song.scale_mode if hasattr(self._song, 'scale_mode') else None
+            scale_name = self._song.scale_name if hasattr(self._song, 'scale_name') else "Unknown"
+            return {
+                "scale_mode": scale_mode,
+                "scale_name": scale_name
+            }
+        except Exception as e:
+            self.log_message("Error getting song scale: " + str(e))
+            return {"error": str(e)}
+
+    def _get_clip_ram_mode(self, track_index, clip_index):
+        """Get whether an audio clip is loaded into RAM"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            clip_slots = list(track.clip_slots)
+            if clip_index >= len(clip_slots):
+                return {"error": "Clip index out of range"}
+            clip_slot = clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                return {"error": "No clip in slot"}
+            clip = clip_slot.clip
+            if clip.is_midi_clip:
+                return {"error": "RAM mode only applies to audio clips"}
+
+            ram_mode = clip.ram_mode if hasattr(clip, 'ram_mode') else False
+            return {"ram_mode": ram_mode}
+        except Exception as e:
+            self.log_message("Error getting clip ram mode: " + str(e))
+            return {"error": str(e)}
+
+    def _set_clip_ram_mode(self, track_index, clip_index, enabled):
+        """Set whether an audio clip is loaded into RAM"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            clip_slots = list(track.clip_slots)
+            if clip_index >= len(clip_slots):
+                return {"error": "Clip index out of range"}
+            clip_slot = clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                return {"error": "No clip in slot"}
+            clip = clip_slot.clip
+            if clip.is_midi_clip:
+                return {"error": "RAM mode only applies to audio clips"}
+
+            clip.ram_mode = enabled
+            return {"success": True, "ram_mode": enabled}
+        except Exception as e:
+            self.log_message("Error setting clip ram mode: " + str(e))
+            return {"error": str(e)}
+
+    def _get_audio_clip_file_path(self, track_index, clip_index):
+        """Get the file path of an audio clip's sample"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            clip_slots = list(track.clip_slots)
+            if clip_index >= len(clip_slots):
+                return {"error": "Clip index out of range"}
+            clip_slot = clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                return {"error": "No clip in slot"}
+            clip = clip_slot.clip
+            if clip.is_midi_clip:
+                return {"error": "File path only applies to audio clips"}
+
+            file_path = clip.file_path if hasattr(clip, 'file_path') else None
+            return {"file_path": file_path}
+        except Exception as e:
+            self.log_message("Error getting audio clip file path: " + str(e))
+            return {"error": str(e)}
+
+    def _get_view_zoom(self):
+        """Get the current zoom level"""
+        try:
+            app = self.application()
+            view = app.view
+
+            result = {}
+            if hasattr(view, 'zoom'):
+                result["zoom"] = view.zoom
+            if hasattr(self._song.view, 'track_width'):
+                result["track_width"] = self._song.view.track_width
+            if hasattr(self._song.view, 'track_height'):
+                result["track_height"] = self._song.view.track_height
+
+            return result if result else {"error": "Zoom not available"}
+        except Exception as e:
+            self.log_message("Error getting view zoom: " + str(e))
+            return {"error": str(e)}
+
+    def _get_follow_mode(self):
+        """Get whether follow mode (auto-scroll) is enabled"""
+        try:
+            follow = self._song.view.follow_song if hasattr(self._song.view, 'follow_song') else False
+            return {"follow_mode": follow}
+        except Exception as e:
+            self.log_message("Error getting follow mode: " + str(e))
+            return {"error": str(e)}
+
+    def _set_follow_mode(self, enabled):
+        """Set follow mode (auto-scroll)"""
+        try:
+            self._song.view.follow_song = enabled
+            return {"success": True, "follow_mode": enabled}
+        except Exception as e:
+            self.log_message("Error setting follow mode: " + str(e))
+            return {"error": str(e)}
+
+    def _get_draw_mode(self):
+        """Get whether draw mode is enabled (for MIDI note entry)"""
+        try:
+            app = self.application()
+            draw_mode = app.view.draw_mode if hasattr(app.view, 'draw_mode') else False
+            return {"draw_mode": draw_mode}
+        except Exception as e:
+            self.log_message("Error getting draw mode: " + str(e))
+            return {"error": str(e)}
+
+    def _set_draw_mode(self, enabled):
+        """Set draw mode"""
+        try:
+            app = self.application()
+            app.view.draw_mode = enabled
+            return {"success": True, "draw_mode": enabled}
+        except Exception as e:
+            self.log_message("Error setting draw mode: " + str(e))
+            return {"error": str(e)}
+
+    def _get_grid_quantization(self):
+        """Get the current grid quantization setting"""
+        try:
+            grid = self._song.view.grid_quantization if hasattr(self._song.view, 'grid_quantization') else 0
+            grid_triplet = self._song.view.grid_is_triplet if hasattr(self._song.view, 'grid_is_triplet') else False
+            return {
+                "grid_quantization": grid,
+                "grid_is_triplet": grid_triplet
+            }
+        except Exception as e:
+            self.log_message("Error getting grid quantization: " + str(e))
+            return {"error": str(e)}
+
+    def _set_grid_quantization(self, quantization, triplet=False):
+        """Set the grid quantization"""
+        try:
+            self._song.view.grid_quantization = quantization
+            self._song.view.grid_is_triplet = triplet
+            return {"success": True, "grid_quantization": quantization, "grid_is_triplet": triplet}
+        except Exception as e:
+            self.log_message("Error setting grid quantization: " + str(e))
+            return {"error": str(e)}
+
+    def _get_drum_rack_pads(self, track_index, device_index):
+        """Get info about all pads in a drum rack"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            devices = list(track.devices)
+            if device_index >= len(devices):
+                return {"error": "Device index out of range"}
+            device = devices[device_index]
+
+            if not device.can_have_drum_pads:
+                return {"error": "Device is not a drum rack"}
+
+            pads = []
+            if hasattr(device, 'drum_pads'):
+                for pad in device.drum_pads:
+                    pad_info = {
+                        "note": pad.note,
+                        "name": pad.name,
+                        "mute": pad.mute,
+                        "solo": pad.solo
+                    }
+                    if hasattr(pad, 'chains') and pad.chains:
+                        pad_info["has_chain"] = True
+                    pads.append(pad_info)
+
+            return {"pads": pads, "count": len(pads)}
+        except Exception as e:
+            self.log_message("Error getting drum rack pads: " + str(e))
+            return {"error": str(e)}
+
+    def _set_drum_rack_pad_mute(self, track_index, device_index, note, mute):
+        """Mute/unmute a drum rack pad by note number"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            devices = list(track.devices)
+            if device_index >= len(devices):
+                return {"error": "Device index out of range"}
+            device = devices[device_index]
+
+            if not device.can_have_drum_pads:
+                return {"error": "Device is not a drum rack"}
+
+            for pad in device.drum_pads:
+                if pad.note == note:
+                    pad.mute = mute
+                    return {"success": True, "note": note, "mute": mute}
+
+            return {"error": "Pad not found for note {0}".format(note)}
+        except Exception as e:
+            self.log_message("Error setting drum rack pad mute: " + str(e))
+            return {"error": str(e)}
+
+    def _set_drum_rack_pad_solo(self, track_index, device_index, note, solo):
+        """Solo/unsolo a drum rack pad by note number"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            devices = list(track.devices)
+            if device_index >= len(devices):
+                return {"error": "Device index out of range"}
+            device = devices[device_index]
+
+            if not device.can_have_drum_pads:
+                return {"error": "Device is not a drum rack"}
+
+            for pad in device.drum_pads:
+                if pad.note == note:
+                    pad.solo = solo
+                    return {"success": True, "note": note, "solo": solo}
+
+            return {"error": "Pad not found for note {0}".format(note)}
+        except Exception as e:
+            self.log_message("Error setting drum rack pad solo: " + str(e))
+            return {"error": str(e)}
+
+    def _get_rack_macros(self, track_index, device_index):
+        """Get all macro knob values from a rack device"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            devices = list(track.devices)
+            if device_index >= len(devices):
+                return {"error": "Device index out of range"}
+            device = devices[device_index]
+
+            if not device.can_have_chains:
+                return {"error": "Device is not a rack"}
+
+            macros = []
+            # Macros are typically the first 8 or 16 parameters
+            if hasattr(device, 'parameters'):
+                for i, param in enumerate(device.parameters):
+                    if 'Macro' in param.name or i < 8:  # First 8 are usually macros
+                        macros.append({
+                            "index": i,
+                            "name": param.name,
+                            "value": param.value,
+                            "min": param.min,
+                            "max": param.max
+                        })
+
+            return {"macros": macros, "count": len(macros)}
+        except Exception as e:
+            self.log_message("Error getting rack macros: " + str(e))
+            return {"error": str(e)}
+
+    def _set_rack_macro(self, track_index, device_index, macro_index, value):
+        """Set a macro knob value on a rack device"""
+        try:
+            tracks = list(self._song.tracks)
+            if track_index >= len(tracks):
+                return {"error": "Track index out of range"}
+            track = tracks[track_index]
+            devices = list(track.devices)
+            if device_index >= len(devices):
+                return {"error": "Device index out of range"}
+            device = devices[device_index]
+
+            if not device.can_have_chains:
+                return {"error": "Device is not a rack"}
+
+            if macro_index >= len(device.parameters):
+                return {"error": "Macro index out of range"}
+
+            param = device.parameters[macro_index]
+            param.value = max(param.min, min(param.max, value))
+            return {"success": True, "macro_index": macro_index, "value": param.value}
+        except Exception as e:
+            self.log_message("Error setting rack macro: " + str(e))
+            return {"error": str(e)}
+
+    def _get_punch_settings(self):
+        """Get punch in/out settings"""
+        try:
+            result = {}
+            if hasattr(self._song, 'punch_in'):
+                result["punch_in"] = self._song.punch_in
+            if hasattr(self._song, 'punch_out'):
+                result["punch_out"] = self._song.punch_out
+            if hasattr(self._song, 'loop_start'):
+                result["punch_in_position"] = self._song.loop_start
+            if hasattr(self._song, 'loop_length'):
+                result["punch_out_position"] = self._song.loop_start + self._song.loop_length
+            return result if result else {"error": "Punch settings not available"}
+        except Exception as e:
+            self.log_message("Error getting punch settings: " + str(e))
+            return {"error": str(e)}
+
+    def _set_punch_in(self, enabled):
+        """Enable/disable punch in"""
+        try:
+            self._song.punch_in = enabled
+            return {"success": True, "punch_in": enabled}
+        except Exception as e:
+            self.log_message("Error setting punch in: " + str(e))
+            return {"error": str(e)}
+
+    def _set_punch_out(self, enabled):
+        """Enable/disable punch out"""
+        try:
+            self._song.punch_out = enabled
+            return {"success": True, "punch_out": enabled}
+        except Exception as e:
+            self.log_message("Error setting punch out: " + str(e))
+            return {"error": str(e)}
+
+    def _get_back_to_arrangement(self):
+        """Get whether back to arrangement is needed"""
+        try:
+            back = self._song.back_to_arranger if hasattr(self._song, 'back_to_arranger') else False
+            return {"back_to_arrangement": back}
+        except Exception as e:
+            self.log_message("Error getting back to arrangement: " + str(e))
+            return {"error": str(e)}
+
+    def _trigger_back_to_arrangement(self):
+        """Trigger back to arrangement"""
+        try:
+            if hasattr(self._song, 'back_to_arranger'):
+                self._song.back_to_arranger = False
+                return {"success": True}
+            return {"error": "Back to arrangement not available"}
+        except Exception as e:
+            self.log_message("Error triggering back to arrangement: " + str(e))
+            return {"error": str(e)}
