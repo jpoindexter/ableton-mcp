@@ -395,6 +395,104 @@ Claude AI ←→ MCP Server (Python/FastMCP) ←→ Ableton Remote Script (Pytho
               Port 9877 TCP                   Ableton Live API
 ```
 
+---
+
+## Alternative: Ollama & Other LLMs
+
+AbletonMCP also supports **Ollama** and other LLMs via a REST API. This lets you use free, local AI models.
+
+### Quick Start with Ollama
+
+1. Install Ollama: https://ollama.ai
+   ```bash
+   # macOS
+   brew install ollama
+   ```
+
+2. Pull a model with tool support:
+   ```bash
+   ollama pull llama3.2
+   ```
+
+3. Install REST API dependencies:
+   ```bash
+   pip install fastapi uvicorn pydantic
+   ```
+
+4. Start the REST API server:
+   ```bash
+   python MCP_Server/rest_api_server.py
+   ```
+
+5. Run the interactive chat:
+   ```bash
+   python examples/ollama_example.py
+   ```
+
+### REST API Endpoints
+
+The REST API runs on `http://localhost:8000`:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Check Ableton connection |
+| `/tools` | GET | Get tool definitions for LLMs |
+| `/api/command` | POST | Execute any Ableton command |
+| `/docs` | GET | Interactive API documentation |
+
+Example using curl:
+```bash
+# Get session info
+curl http://localhost:8000/api/session
+
+# Set tempo
+curl -X POST http://localhost:8000/api/tempo \
+  -H "Content-Type: application/json" \
+  -d '{"tempo": 120}'
+
+# Create a drum pattern
+curl -X POST http://localhost:8000/api/music/drums \
+  -H "Content-Type: application/json" \
+  -d '{"style": "house", "bars": 2}'
+```
+
+### Supported LLM Providers
+
+| Provider | Cost | Setup |
+|----------|------|-------|
+| Ollama | Free (local) | `ollama pull llama3.2` |
+| Groq | Free tier | API key from console.groq.com |
+| OpenAI | Paid | API key from platform.openai.com |
+| Claude API | Paid | API key from console.anthropic.com |
+
+---
+
+## Alternative: Max for Live Device
+
+For a fully integrated experience without needing Claude Desktop, use the **Max for Live device**.
+
+### Features
+- Multi-provider support (Ollama, OpenAI, Claude API, Groq)
+- Visual UI inside Ableton
+- No external server needed
+- Works with any LLM
+
+### Installation
+
+1. Copy `AbletonMCP_M4L` folder to:
+   - macOS: `~/Music/Ableton/User Library/Presets/Audio Effects/Max Audio Effect/`
+   - Windows: `Documents\Ableton\User Library\Presets\Audio Effects\Max Audio Effect\`
+
+2. Rename `AbletonMCP.amxd.maxpat` to `AbletonMCP.amxd`
+
+3. Drag onto any track in Ableton Live
+
+4. Select your AI provider and start chatting!
+
+See [AbletonMCP_M4L/README.md](AbletonMCP_M4L/README.md) for detailed setup.
+
+---
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
