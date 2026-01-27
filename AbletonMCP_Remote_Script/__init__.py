@@ -226,6 +226,10 @@ class AbletonMCP(ControlSurface):
                 track_index = params.get("track_index", 0)
                 clip_index = params.get("clip_index", 0)
                 response["result"] = self._get_clip_notes(track_index, clip_index)
+            elif command_type == "get_clip_info":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_clip_info(track_index, clip_index)
             elif command_type == "get_device_parameters":
                 track_index = params.get("track_index", 0)
                 device_index = params.get("device_index", 0)
@@ -928,6 +932,49 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error getting clip notes: " + str(e))
+            raise
+
+    def _get_clip_info(self, track_index, clip_index):
+        """Get clip metadata without notes"""
+        try:
+            clip_slot = self._validate_clip_slot(track_index, clip_index)
+
+            if not clip_slot.has_clip:
+                return {
+                    "track_index": track_index,
+                    "clip_index": clip_index,
+                    "has_clip": False
+                }
+
+            clip = clip_slot.clip
+
+            result = {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "has_clip": True,
+                "name": clip.name,
+                "length": clip.length,
+                "is_midi_clip": clip.is_midi_clip,
+                "is_audio_clip": clip.is_audio_clip,
+                "is_playing": clip.is_playing,
+                "is_recording": clip.is_recording,
+                "is_triggered": clip.is_triggered,
+                "looping": clip.looping,
+                "loop_start": clip.loop_start,
+                "loop_end": clip.loop_end,
+                "start_marker": clip.start_marker,
+                "end_marker": clip.end_marker,
+                "color_index": clip.color_index
+            }
+
+            # Add warp mode for audio clips
+            if clip.is_audio_clip:
+                result["warping"] = clip.warping
+                result["warp_mode"] = clip.warp_mode if hasattr(clip, 'warp_mode') else None
+
+            return result
+        except Exception as e:
+            self.log_message("Error getting clip info: " + str(e))
             raise
 
     def _delete_clip(self, track_index, clip_index):
