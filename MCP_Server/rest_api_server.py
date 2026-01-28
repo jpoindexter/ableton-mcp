@@ -818,6 +818,23 @@ def set_metronome(req: MetronomeRequest):
     return ableton.send_command("set_metronome", {"enabled": req.enabled})
 
 # Tracks
+@app.get("/api/tracks")
+def get_all_tracks(
+    limit: int = Query(None, ge=1, le=1000, description="Maximum number of tracks to return"),
+    offset: int = Query(0, ge=0, description="Number of tracks to skip")
+):
+    """Get all track names with optional pagination"""
+    result = ableton.send_command("get_all_track_names")
+    if isinstance(result, dict) and "tracks" in result:
+        tracks = result["tracks"]
+        total = len(tracks)
+        if limit is not None:
+            tracks = tracks[offset:offset + limit]
+        else:
+            tracks = tracks[offset:] if offset > 0 else tracks
+        return {"tracks": tracks, "returns": result.get("returns", []), "master": result.get("master"), "total": total, "offset": offset, "limit": limit}
+    return result
+
 @app.get("/api/tracks/{track_index}")
 def get_track_info(track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX, description="Track index")):
     return ableton.send_command("get_track_info", {"track_index": track_index})
@@ -1244,8 +1261,21 @@ def set_clip_warp_mode(
 
 # Scenes
 @app.get("/api/scenes")
-def get_all_scenes():
-    return ableton.send_command("get_all_scenes")
+def get_all_scenes(
+    limit: int = Query(None, ge=1, le=1000, description="Maximum number of scenes to return"),
+    offset: int = Query(0, ge=0, description="Number of scenes to skip")
+):
+    """Get all scenes with optional pagination"""
+    result = ableton.send_command("get_all_scenes")
+    if isinstance(result, dict) and "scenes" in result:
+        scenes = result["scenes"]
+        total = len(scenes)
+        if limit is not None:
+            scenes = scenes[offset:offset + limit]
+        else:
+            scenes = scenes[offset:] if offset > 0 else scenes
+        return {"scenes": scenes, "total": total, "offset": offset, "limit": limit}
+    return result
 
 @app.post("/api/scenes")
 def create_scene(req: SceneCreateRequest):
@@ -1290,9 +1320,24 @@ def select_scene(scene_index: int = Path(..., ge=0, le=MAX_SCENE_INDEX)):
 @app.get("/api/tracks/{track_index}/devices/{device_index}")
 def get_device_parameters(
     track_index: int = Path(..., ge=0, le=MAX_TRACK_INDEX),
-    device_index: int = Path(..., ge=0, le=MAX_DEVICE_INDEX)
+    device_index: int = Path(..., ge=0, le=MAX_DEVICE_INDEX),
+    limit: int = Query(None, ge=1, le=1000, description="Maximum number of parameters to return"),
+    offset: int = Query(0, ge=0, description="Number of parameters to skip")
 ):
-    return ableton.send_command("get_device_parameters", {"track_index": track_index, "device_index": device_index})
+    """Get device parameters with optional pagination"""
+    result = ableton.send_command("get_device_parameters", {"track_index": track_index, "device_index": device_index})
+    if isinstance(result, dict) and "parameters" in result:
+        params = result["parameters"]
+        total = len(params)
+        if limit is not None:
+            params = params[offset:offset + limit]
+        else:
+            params = params[offset:] if offset > 0 else params
+        result["parameters"] = params
+        result["total"] = total
+        result["offset"] = offset
+        result["limit"] = limit
+    return result
 
 @app.put("/api/tracks/{track_index}/devices/{device_index}/parameter")
 def set_device_parameter(

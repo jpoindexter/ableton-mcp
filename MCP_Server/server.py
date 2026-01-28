@@ -1050,6 +1050,69 @@ def flatten_track(ctx: Context, track_index: int) -> str:
         return f"Error flattening track: {str(e)}"
 
 @mcp.tool()
+def unarm_all(ctx: Context) -> str:
+    """
+    Unarm all tracks in the session.
+    Useful before recording to ensure only specific tracks will record.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("unarm_all", {})
+        if result.get("success"):
+            return f"Unarmed {result.get('unarmed_count', 0)} tracks"
+        else:
+            return f"Could not unarm tracks: {result.get('error')}"
+    except Exception as e:
+        logger.error(f"Error unarming tracks: {str(e)}")
+        return f"Error unarming tracks: {str(e)}"
+
+@mcp.tool()
+def move_device_left(ctx: Context, track_index: int, device_index: int) -> str:
+    """
+    Move a device one position to the left in the device chain.
+
+    Parameters:
+    - track_index: The index of the track containing the device
+    - device_index: The index of the device to move
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("move_device_left", {
+            "track_index": track_index,
+            "device_index": device_index
+        })
+        if result.get("success"):
+            return f"Moved device to position {result.get('new_index')}"
+        else:
+            return f"Could not move device: {result.get('error')}"
+    except Exception as e:
+        logger.error(f"Error moving device: {str(e)}")
+        return f"Error moving device: {str(e)}"
+
+@mcp.tool()
+def move_device_right(ctx: Context, track_index: int, device_index: int) -> str:
+    """
+    Move a device one position to the right in the device chain.
+
+    Parameters:
+    - track_index: The index of the track containing the device
+    - device_index: The index of the device to move
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("move_device_right", {
+            "track_index": track_index,
+            "device_index": device_index
+        })
+        if result.get("success"):
+            return f"Moved device to position {result.get('new_index')}"
+        else:
+            return f"Could not move device: {result.get('error')}"
+    except Exception as e:
+        logger.error(f"Error moving device: {str(e)}")
+        return f"Error moving device: {str(e)}"
+
+@mcp.tool()
 def set_track_color(ctx: Context, track_index: int, color: int) -> str:
     """
     Set the color of a track.

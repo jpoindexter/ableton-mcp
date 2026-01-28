@@ -625,9 +625,11 @@ class AbletonMCP(ControlSurface):
                                  # Return tracks
                                  "create_return_track", "delete_return_track",
                                  # Multi-track operations
-                                 "solo_exclusive", "unsolo_all", "unmute_all",
+                                 "solo_exclusive", "unsolo_all", "unmute_all", "unarm_all",
                                  # Device
-                                 "move_device", "set_device_collapsed",
+                                 "move_device", "move_device_left", "move_device_right", "set_device_collapsed",
+                                 # Track freeze/flatten
+                                 "freeze_track", "flatten_track",
                                  # Cue points
                                  "jump_to_cue_point", "jump_to_prev_cue", "jump_to_next_cue",
                                  # Detail view
@@ -652,7 +654,8 @@ class AbletonMCP(ControlSurface):
                                  # Scrub
                                  "scrub_by"]:
                 # Use a thread-safe approach with a response queue
-                response_queue = queue.Queue()
+                # maxsize=10 prevents unbounded memory growth
+                response_queue = queue.Queue(maxsize=10)
                 
                 # Define a function to execute on the main thread
                 def main_thread_task():
@@ -1204,11 +1207,27 @@ class AbletonMCP(ControlSurface):
                             result = self._unsolo_all()
                         elif command_type == "unmute_all":
                             result = self._unmute_all()
+                        elif command_type == "unarm_all":
+                            result = self._unarm_all()
+                        elif command_type == "freeze_track":
+                            track_index = params.get("track_index", 0)
+                            result = self._freeze_track(track_index)
+                        elif command_type == "flatten_track":
+                            track_index = params.get("track_index", 0)
+                            result = self._flatten_track(track_index)
                         elif command_type == "move_device":
                             track_index = params.get("track_index", 0)
                             device_index = params.get("device_index", 0)
                             new_index = params.get("new_index", 0)
                             result = self._move_device(track_index, device_index, new_index)
+                        elif command_type == "move_device_left":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            result = self._move_device_left(track_index, device_index)
+                        elif command_type == "move_device_right":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            result = self._move_device_right(track_index, device_index)
                         elif command_type == "set_device_collapsed":
                             track_index = params.get("track_index", 0)
                             device_index = params.get("device_index", 0)
@@ -6931,5 +6950,82 @@ class AbletonMCP(ControlSurface):
             )
             clip.set_notes(new_notes)
             return {"moved": len(notes)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    # ========================================================================
+    # FREEZE / FLATTEN TRACK
+    # ========================================================================
+
+    def _freeze_track(self, track_index):
+        """Freeze a track to reduce CPU usage"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                return {"error": "Track index out of range"}
+            track = list(self._song.tracks)[track_index]
+            if hasattr(track, 'freeze'):
+                track.freeze()
+                return {"success": True, "track_index": track_index}
+            return {"error": "Track cannot be frozen"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _flatten_track(self, track_index):
+        """Flatten a frozen track to audio"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                return {"error": "Track index out of range"}
+            track = list(self._song.tracks)[track_index]
+            if hasattr(track, 'flatten'):
+                track.flatten()
+                return {"success": True, "track_index": track_index}
+            return {"error": "Track cannot be flattened"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    # ========================================================================
+    # UNARM ALL TRACKS
+    # ========================================================================
+
+    def _unarm_all(self):
+        """Unarm all tracks"""
+        try:
+            count = 0
+            for track in self._song.tracks:
+                if track.can_be_armed and track.arm:
+                    track.arm = False
+                    count += 1
+            return {"success": True, "unarmed_count": count}
+        except Exception as e:
+            return {"error": str(e)}
+
+    # ========================================================================
+    # MOVE DEVICE LEFT/RIGHT
+    # ========================================================================
+
+    def _move_device_left(self, track_index, device_index):
+        """Move device one position to the left"""
+        try:
+            if device_index <= 0:
+                return {"error": "Device already at leftmost position"}
+            track = list(self._song.tracks)[track_index]
+            device = list(track.devices)[device_index]
+            new_index = device_index - 1
+            self._song.move_device(device, track, new_index)
+            return {"success": True, "new_index": new_index}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _move_device_right(self, track_index, device_index):
+        """Move device one position to the right"""
+        try:
+            track = list(self._song.tracks)[track_index]
+            device_count = len(list(track.devices))
+            if device_index >= device_count - 1:
+                return {"error": "Device already at rightmost position"}
+            device = list(track.devices)[device_index]
+            new_index = device_index + 1
+            self._song.move_device(device, track, new_index)
+            return {"success": True, "new_index": new_index}
         except Exception as e:
             return {"error": str(e)}
