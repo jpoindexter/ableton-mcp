@@ -1,0 +1,70 @@
+name: Bug Report
+description: Report a bug or issue
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of AbletonMCP is affected?
+      options:
+        - Remote Script (Ableton control surface)
+        - MCP Server (Claude Desktop / Cursor)
+        - REST API Server
+        - Max for Live Device
+        - Documentation
+    validations:
+      required: true
+
+  - type: input
+    id: ableton-version
+    attributes:
+      label: Ableton Live Version
+      placeholder: "e.g. 12.1, 11.3.4"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      placeholder: "e.g. macOS 15.2, Windows 11"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug. What did you expect to happen vs what actually happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce this issue?
+      placeholder: |
+        1. Load the Remote Script
+        2. Send command X
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error logs
+      description: Paste any relevant error messages or logs (check Ableton's Log.txt or Max Console)
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: command
+    attributes:
+      label: Command that failed (if applicable)
+      placeholder: "e.g. set_clip_automation, freeze_track"
+    validations:
+      required: false

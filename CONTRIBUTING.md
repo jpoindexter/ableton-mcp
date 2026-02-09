@@ -143,26 +143,27 @@ async function myFunction(param) {
 }
 ```
 
-### Adding New Tools
+### Adding New Commands
 
 1. **Remote Script** (`AbletonMCP_Remote_Script/__init__.py`):
-   - Add command handler in `_handle_command()`
-   - Create handler method with `_handle_your_command()`
-   - Use thread-safe pattern for state-modifying commands
+   - Add a `_your_command_name()` handler method
+   - Add routing in `_process_command()`:
+     - Read only commands go in the first `if/elif` section
+     - State changing commands go in the `schedule_message` section for main thread safety
+   - Copy updated file to Ableton's MIDI Remote Scripts folder to test
 
-2. **MCP Server** (`MCP_Server/server.py`):
+2. **REST API** (`MCP_Server/rest_api_server.py`):
+   - Add to `ALLOWED_COMMANDS` set
+   - Add a REST endpoint with proper HTTP method
+   - Create Pydantic model for request body if needed
+   - Add parameter validation to `COMMAND_PARAMS`
+
+3. **MCP Server** (`MCP_Server/server.py`):
    - Add `@mcp.tool()` decorated function
-   - Add to `is_modifying_command` list if it changes state
    - Document parameters and return value
 
-3. **REST API** (`MCP_Server/rest_api_server.py`):
-   - Add endpoint with proper HTTP method
-   - Create Pydantic model for request body
-   - Add to TOOL_DEFINITIONS
-
-4. **Documentation**:
-   - Update README.md tool reference
-   - Update CHANGELOG.md
+4. **M4L Device** (`AbletonMCP_M4L/code/main.js`):
+   - Add tool definition to the `TOOLS` array
 
 ### Tool Naming Conventions
 
