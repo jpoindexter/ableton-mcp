@@ -608,6 +608,29 @@ def create_clip(ctx: Context, track_index: int, clip_index: int, length: float =
         return f"Error creating clip: {str(e)}"
 
 @mcp.tool()
+def create_audio_clip(ctx: Context, track_index: int, clip_index: int, path: str) -> str:
+    """
+    Create a new audio clip in an audio track's clip slot by importing a file.
+
+    Parameters:
+    - track_index: The index of the audio track to create the clip in
+    - clip_index: The index of the clip slot to create the clip in
+    - path: Absolute path to a supported audio file (e.g. a .wav). The target
+      track must be an audio track and the clip slot must be empty.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("create_audio_clip", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "path": path
+        })
+        return f"Created audio clip '{result.get('name', 'clip')}' at track {track_index}, slot {clip_index} (length {result.get('length', '?')} beats)"
+    except Exception as e:
+        logger.error(f"Error creating audio clip: {str(e)}")
+        return f"Error creating audio clip: {str(e)}"
+
+@mcp.tool()
 def delete_clip(ctx: Context, track_index: int, clip_index: int) -> str:
     """
     Delete a clip from a clip slot.
