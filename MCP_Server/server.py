@@ -2253,7 +2253,7 @@ def search_browser(ctx: Context, query: str, category: str = "all") -> str:
 
     Parameters:
     - query: Search term to find in item names
-    - category: Category to search in (all, instruments, sounds, drums, audio_effects, midi_effects)
+    - category: Category to search in (all, instruments, sounds, drums, audio_effects, midi_effects, plugins)
     """
     try:
         ableton = get_ableton_connection()

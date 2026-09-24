@@ -1534,7 +1534,9 @@ class AbletonMCP(ControlSurface):
                 "midi_effects": browser.midi_effects,
             }
 
-            # Add samples and packs if available
+            # Add plugins, samples and packs if available
+            if hasattr(browser, 'plugins'):
+                category_map["plugins"] = browser.plugins
             if hasattr(browser, 'samples'):
                 category_map["samples"] = browser.samples
             if hasattr(browser, 'packs'):
@@ -1646,6 +1648,10 @@ class AbletonMCP(ControlSurface):
                     ("audio_effects", browser.audio_effects),
                     ("midi_effects", browser.midi_effects)
                 ]
+                if hasattr(browser, 'plugins'):
+                    categories_to_search.append(("plugins", browser.plugins))
+            elif category == "plugins" and hasattr(browser, 'plugins'):
+                categories_to_search = [("plugins", browser.plugins)]
             elif category == "instruments":
                 categories_to_search = [("instruments", browser.instruments)]
             elif category == "sounds":
@@ -4605,8 +4611,10 @@ class AbletonMCP(ControlSurface):
                 
                 # Determine the root based on the first part
                 current_item = None
-                if path_parts[0].lower() == "nstruments":
+                if path_parts[0].lower() == "instruments":
                     current_item = app.browser.instruments
+                elif path_parts[0].lower() == "plugins" and hasattr(app.browser, 'plugins'):
+                    current_item = app.browser.plugins
                 elif path_parts[0].lower() == "sounds":
                     current_item = app.browser.sounds
                 elif path_parts[0].lower() == "drums":
@@ -4712,6 +4720,8 @@ class AbletonMCP(ControlSurface):
                     browser_or_item.audio_effects,
                     browser_or_item.midi_effects
                 ]
+                if hasattr(browser_or_item, 'plugins'):
+                    categories.append(browser_or_item.plugins)
                 
                 for category in categories:
                     item = self._find_browser_item_by_uri(category, uri, max_depth, current_depth + 1)
